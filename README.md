@@ -1,6 +1,6 @@
 # mslurm
 
-This is a toolbox to send Matlab jobs from your local machine (the client) to an HPC cluster running the SLURM scheduler (the server). As long as you have unlimited licenses to run Matlab on the cluster, this allows you to run man jobs in parallel, without the distributed computing server license. This only works for "dumb" parallelism though; messaging between jobs is not used. A simple gui shows information from the slumr acccounting log on the server, can retrieve data and log files, and allows you to restart failed jobs.
+This is a toolbox to send Matlab jobs from your local machine (the client) to an HPC cluster running the SLURM scheduler (the server). As long as you have unlimited licenses to run Matlab on the cluster, this allows you to run many jobs in parallel, without the distributed computing server license. This only works for "dumb" parallelism though; messaging between jobs is not used. A simple gui shows information from the slumr acccounting log on the server, can retrieve data and log files, and allows you to restart failed jobs.
 
 
 ## Installation:
@@ -23,3 +23,6 @@ Clone the SSH2 repository (https://github.com/davidfreedman/matlab-ssh2.git) to 
 The GUI depends on the findjobj tool (Yair Altman). Download it from the file exchange:
 https://nl.mathworks.com/matlabcentral/fileexchange/14317-findjobj-find-java-handles-of-matlab-graphic-objects
 and add it to your Matlab install on the client. 
+
+## Usage
+See slurmExample.m in the mslurm directory for a commented example how to use the toolbox.
