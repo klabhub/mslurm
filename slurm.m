@@ -148,7 +148,7 @@ classdef slurm < handle
                 result = o.command(['cd ' d{i} '; git pull origin']);
                 result = unique(result);
                 for j=1:numel(result)
-                    sibwarn(['Remote Git update ( ' d{i} '): ' result{j} ],2);
+                    warning(['Remote Git update ( ' d{i} '): ' result{j} ]);
                 end
             end
         end
@@ -534,7 +534,7 @@ classdef slurm < handle
                         end
                         fprintf(fid,'#SBATCH --%s=%s\n',batchOptions{opt},batchOptions{opt+1});
                     else
-                        siberr('sbatch options should be char or numeric');
+                        error('sbatch options should be char or numeric');
                     end
                 end
                 fprintf(fid,'srun %s %s\n',p.Results.runOptions,run);
@@ -967,7 +967,7 @@ classdef slurm < handle
             % Copy to head
             scpCommand = ['scp ' fName ' ' jobDir];
             tic;
-            sibwarn(['Transferring data back to head node: ' scpCommand]);
+            warning(['Transferring data back to head node: ' scpCommand]);
             [scpStatus,scpResult]  = system(scpCommand);
             if iscell(scpResult) ;scpResult = char(scpResult{:});end
             
@@ -981,7 +981,7 @@ classdef slurm < handle
             
             [status,result]  = system(['rm  ' fName]);
             if status~=0
-                sibwarn(['rm  of ' fName ' failed'  ]); % Warning only
+                warning(['rm  of ' fName ' failed'  ]); % Warning only
                 result %#ok<NOPRT>
             end
             
