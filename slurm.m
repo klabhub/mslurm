@@ -1,7 +1,8 @@
 % A class to interact with a remote SLURM cluster using SSH
 %
 % Depends on the SSH2 Package available on the Matlab FileExchange.
-%
+% See readme.md for installation instructions and slurmExample for an
+% example.
 %
 % EXAMPLE:
 % Setup a connection to  a cluster
@@ -30,6 +31,7 @@
 % See also slurmGui.
 %
 % BK - Jan 2015
+% June 2017 - Public release.
 
 classdef slurm < handle
     
