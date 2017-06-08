@@ -31,7 +31,7 @@ results = cls.retrieve(tag);
 
 % Here's another useful function to make sure your mslurm installation on
 % the server is up to date
-mslurmPath = '~/Documents/github/mslurm';
+mslurmPath = '~/Documents/MATLAB/mslurm';
 cls.gitpull(mslurmPath);
 
 % And for troubleshooting, the slurmDiagnosis function can come in handy
