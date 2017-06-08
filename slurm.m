@@ -338,6 +338,13 @@ classdef slurm < handle
             %                   slurm.sbatch
             % 'runOptions'  = also passed to slurm. See slurm.sbatch
             %
+            % 
+            % 'copy' set to true to copy the mfile (fun) to the server.
+            % Useful if the mfile you're executing is self-contained and
+            % does not yet exist on the server. Note that it will be copied
+            % to the .remoteStorage location, which is the working
+            % directory of the jobs.
+            %
             % To retrieve the output each of the evaluations of fun, this
             % funciton returns a unique 'tag' that can be passed to
             % slurm.retrieve().
@@ -368,6 +375,7 @@ classdef slurm < handle
             p.addParameter('batchOptions',{});
             p.addParameter('runOptions','');
             p.addParameter('debug',false);
+            p.addParameter('copy',false);            
             p.KeepUnmatched = true;
             p.parse(varargin{:});
             
@@ -382,6 +390,12 @@ classdef slurm < handle
                 o.put(localArgsFile,jobDir);
             else
                 remoteArgsFile ='';
+            end
+            
+            if p.Results.copy
+                % Copy the mfile to remote storage. 
+                mfilename = which(fun);
+                o.put(mfilename,o.remoteStorage);
             end
             
             %% Start the jobs
