@@ -150,7 +150,11 @@ classdef slurm < handle
                 result = o.command(['cd ' d{i} '; git pull origin']);
                 result = unique(result);
                 for j=1:numel(result)
-                    warning(['Remote Git update ( ' d{i} '): ' result{j} ]);
+                    if isempty(result{j})
+                        warning(['Nothing to update (' d{i} ')']);
+                    else
+                        warning(['Remote Git update ( ' d{i} '): ' result{j} ]);
+                    end
                 end
             end
         end
@@ -356,6 +360,12 @@ classdef slurm < handle
                 error('The fun argument must be the name of an m-file');
             end
             %% Prepare job directories with data and args
+            if ischar(data)
+                % Assume that a single string input means pass this string
+                % to a single worker (and not pass each character to a
+                % separate worker).
+                data = {data};
+            end
             nrDataJobs = numel(data);
             jobName = [fun '-' uid];
             jobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
@@ -399,7 +409,7 @@ classdef slurm < handle
             end
             
             %% Start the jobs
-            o.sbatch('jobName',jobName,'uniqueID','auto','batchOptions',p.Results.batchOptions,'mfile','slurm.run','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobDir},'debug',p.Results.debug,'runOptions',p.Results.runOptions,'nrInArray',nrDataJobs);            
+            o.sbatch('jobName',jobName,'uniqueID','auto','batchOptions',p.Results.batchOptions,'mfile','slurm.run','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobDir},'debug',p.Results.debug,'runOptions',p.Results.runOptions,'nrInArray',nrDataJobs,'taskNr',1);            
             
         end
         

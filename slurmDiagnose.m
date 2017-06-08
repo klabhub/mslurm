@@ -14,6 +14,8 @@ function result = slurmDiagnose(options)
 %
 % BK - June 2017
 
+result = [];  % Most diagnoses don't return values, Just inspect the logfile.
+
 if ischar(options)
     options = {options};
 end
@@ -21,17 +23,24 @@ end
 for o=1:numel(options)
     switch upper(options{o})
         case 'BASIC'
-            disp ('Working directory')
-            pwd
+            disp(['OS: ' computer]);
+            disp (['Working directory: ' pwd]);
+            if ispc
+            disp (['User: ' getenv('Username')]);
+            else
+                disp (['User: ' getenv('User')]);
+            end
+            if ispc
+                disp(['Computer:' getenv('COMPUTERNAME')]);
+            else
+                disp(['Computer:' getenv('HOSTNAME')]);
+            end
             
-            disp ('User')
-            getenv('Username')
+            disp(['Userpath: '  userpath]);
             
-            disp('node name')
-            getenv('COMPUTERNAME')
-            
-            disp('Userpath')
-            userpath
+           
+            %% Version 
+            ver
             
             disp('Path')
             path
