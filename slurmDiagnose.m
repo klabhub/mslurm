@@ -14,6 +14,8 @@ function result = slurmDiagnose(options)
 %
 % BK - June 2017
 
+result = [];  % Most diagnoses don't return values, Just inspect the logfile.
+
 if ischar(options)
     options = {options};
 end
