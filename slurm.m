@@ -997,7 +997,8 @@ classdef slurm < handle
             % pass it to the mfile, together with all the args. The user
             % should specify an mfile that takes data{i} as its first
             % input.
-            result = feval(p.Results.mFile,dataMatFile.data{taskNr,1},args{:});
+            data = dataMatFile(taksNr,1); % Must specify ,1 for a slice of a MatFile. And cannot use {}.           
+            result = feval(p.Results.mFile,data{1},args{:});
             
             % Save the result in the jobDir as 1.result.mat, 2.result.mat
             % etc.
