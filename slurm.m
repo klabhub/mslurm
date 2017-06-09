@@ -345,17 +345,125 @@ classdef slurm < handle
             end
         end
         function fileInFileOut(o,fun,varargin)
+            % This function takes a list of files, generates one job per
+            % file to process the file and then saves the results in an
+            % output file. 
+            % 
+            % The first input argument 'fun' should be a function that takes a filename
+            % (complete with path) as its first input, and returns a single
+            % ouput. This single output will be saved to the output file. 
+            % Additional inputs to 'fun' can be specified as parameter/value
+            % pairs.
+            %
+            % Input args: (parm/value pairs).
+            % 'inFile' -  a cell array of file names to process
+            % 'inPath'  -  a single path (that exists on the server) 
+            % 'outTag' - This tag will be appended to the output filename                  
+            % 'outPath' - a single path to which the restuls will be
+            % written.
+            %
+            % Slurm options can be specified as
+            % 'batchOptions'   -see slurm.sbatch
+            % 'runOptions' - see slurm.sbatch
+            % 
+            % If the 'fun' is self-contained you can copy it to the server
+            % with 'copy' set to true.
+            % 
+            % EXAMPLE 
+            % o.fileInFileOut('preprocess','inFile',{'f1.mat','f2.mat','f3.mat',f4.mat','f5.mat'},'inPath','/work/data/','outPath','/work/results/','outTag','.preprocessed','mode',1)
+            % Will start jobs that calls the preprocess function like this
+            % (for each fo the f1..f5)
+            % results = preprocess('/work/data/f1.mat','mode',1);
+            % (Note how the 'mode' argument is passed to the user
+            % defined preprocess function: all parm/value pairs that are
+            % note recognized by the fileInFileOut function are passed that
+            % way).
+            % After completing the job, the results will be saved in
+            % /work/results/f1.preprocessed.mat
+            % 
+            % 
+            
             p=inputParser;
             p.addParameter('inFile','',@(x) (ischar(x)|| iscell(x)));
-            p.addParameter('inPath','',@(x) (ischar(x)|| iscell(x)));
-            p.addParameter('outFile','',@(x) (ischar(x)|| iscell(x)));
-            p.addParameter('outPath','',@(x) (ischar(x)|| iscell(x)));                        
+            p.addParameter('inPath','',@ischar);
+            p.addParameter('outTag','.processed',@ischar);
+            p.addParameter('outPath','',@ischar);                        
+            p.addParameter('batchOptions',{});
+            p.addParameter('runOptions','');
+            p.addParameter('debug',false);
+            p.addParameter('copy',false);            
+            p.KeepUnmatched = true;
             p.parse(varargin{:});
             
             
+            %% Prepare the list of files and paths
+            if ischar(p.Results.inFile)
+                inFile = { p.Results.inFile}; % single file
+            else
+                inFile = p.Results.inFile(:);
+            end
+            
+            nrFiles= size(inFile,1);
+            if ischar(p.Results.inPath)
+                inPath = repmat({p.Results.inPath},[nrFiles 1]); %#ok<NASGU> % One path per in File.
+            elseif numel(p.Results.inPath) == nrFiles;
+                inPath = p.Results.inPath(:); %#ok<NASGU>
+            else
+                error('The number of inPath does not match the number of inFile');
+            end
+            
+            % Out files are infile+tag
+            outFile= cell(size(inFile));
+            for i=1:nrFiles
+                    [~,f,e] = fileparts(inFile{i});
+                    outFile{i} = [f p.Results.outTag e];
+            end
+            outPath = p.Results.outPath;     %#ok<NASGU>
+            
+            
+            %% Setup the jobs
+            uid = datestr(now,'yy.mm.dd_HH.MM.SS.FFF');
+            if ~ischar(fun)
+                error('The fun argument must be the name of an m-file');
+            end
+            jobName = [fun '-' uid];
+            jobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
+            localDataFile = fullfile(o.localStorage,[uid '_data.mat']);
+            remoteDataFile = strrep(fullfile(jobDir,[uid '_data.mat']),'\','/');
+            
+            
+            
+            save(localDataFile,'inFile','outFile','inPath','outPath','-v7.3'); % 7.3 needed to allow partial loading of the data in each worker.
+            % Copy the data file to the cluster
+            o.put(localDataFile,jobDir);
+            
+            
+            if ~isempty(fieldnames(p.Unmatched))
+                args = p.Unmatched; %#ok<NASGU>
+                argsFile = [uid '_args.mat'];
+                % Save a local copy of the args
+                localArgsFile = fullfile(o.localStorage,argsFile);
+                remoteArgsFile = strrep(fullfile(jobDir,argsFile),'\','/');
+                save(localArgsFile,'args');
+                % Copy the args file to the cluster
+                o.put(localArgsFile,jobDir);
+            else
+                remoteArgsFile ='';
+            end
+            
+            if p.Results.copy
+                % Copy the mfile to remote storage. 
+                mfilename = which(fun);
+                o.put(mfilename,o.remoteStorage);
+            end
+            
+            %% Start the jobs
+            o.sbatch('jobName',jobName,'uniqueID','auto','batchOptions',p.Results.batchOptions,'mfile','slurm.fileInFileOutRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir},'debug',p.Results.debug,'runOptions',p.Results.runOptions,'nrInArray',nrFiles,'taskNr',1);            
             
             
         end
+        
+    
         function jobName = feval(o,fun,data,varargin)
             % Evaluate the function fun on each of the rows of the
             % array data.
@@ -1044,10 +1152,80 @@ classdef slurm < handle
             slurm.saveResult([num2str(taskNr) '.result.mat'] ,result,p.Results.nodeTempDir,p.Results.jobDir);
         end
         
+        
+            
+        function fileInFileOutRun(jobID,taskNr,varargin) %#ok<INUSL>
+            % This function runs on the cluster in response to a call to slurm.fileInFileOut on the client.
+            % It is not meant to be called directly. call
+            % slurm.fileInFileOut instead.
+            %
+            % It will run a specified mfile on a file, and save the results
+            % in a different file.
+            %
+            % INPUT: 
+            % jobID = slurm job id
+            % taskNr = The number of this job in the array of jobs. This
+            % number is used to pick one item from array of files.
+            % 
+            % Other properties are specified as parm/value pairs
+            % 
+            % 'mfile'  - The Mfile that will be run,.
+            % 'datafile'  - File containing the list of files to process.
+            % 'argsFile'  - File containing the extra input arguments for
+            % the mfile
+            % 'nodeTempDir' - folder on the nodes where temporary
+            % information can be saved (e.g. /scratch)
+            %
+            p = inputParser;
+            p.addParameter('dataFile','');
+            p.addParameter('argsFile','');
+            p.addParameter('mFile','');
+            p.addParameter('nodeTempDir','');
+            p.parse(varargin{:});
+            
+            dataMatFile = matfile(p.Results.dataFile); % Matfile object for the data so that we can pass a slice
+            if ~isempty(p.Results.argsFile)  % args may have extra inputs for the user mfile
+                load(p.Results.argsFile);
+            else
+                args = {};
+            end
+            % Load a single element from the file that specifieof the data cell array from the matfile and
+            % pass it to the mfile, together with all the args. 
+                     
+            inFile = dataMatFile.inFile(taskNr,1); 
+            inPath = dataMatFile.inPath(taskNr,1);
+            outPath = dataMatFile.outPath;
+            outFile = dataMatFile.outFile(taskNr,1); 
+            filename = fullfile(inPath{1},inFile{1});
+            
+            if ~exist(filename,'file')
+                error(['File : ' filename ' does not exist']);
+            end
+            
+            if ~exist(outPath,'dir')
+                [success,message] = mkdir(outPath);
+                if ~success
+                    error(['Failed to create output directory: ' outPath{1} '(' message ')']);
+                end
+            end
+            
+            result = feval(p.Results.mFile,filename,args{:}); % Pass input file and optional args 
+            
+            % Save the result first locally then scp to outPath 
+            slurm.saveResult(outFile{1},result,p.Results.nodeTempDir,outPath);
+        end
+        
+        
+        
+        
         function saveResult(filename,result,tempDir,jobDir) %#ok<INUSL>
             % Save a result first on a tempDir on the node, then copy it to
             % the head node, using scp. Used by slurm.run
-            
+            [p,f,e] = fileparts(filename);
+            if isempty(e) % Force an extension
+                e ='.mat';
+                filename = [p f e];
+            end
             fName =fullfile(tempDir,filename);
             save(fName,'result');
             % Copy to head
