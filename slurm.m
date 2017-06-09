@@ -331,21 +331,14 @@ classdef slurm < handle
             
         end
         function jobName = feval(o,fun,data,varargin)
-            % Evaluate the function fun on each of the elements of the
+            % Evaluate the function fun on each of the rows of the
             % array data.
             %
-            % The mfile fun should be a function that takes one element
-            % of the data array as its input, plus optionally any
+            % The mfile fun should be a function that takes each column of the 
+            % the data array as an input, plus optionally any
             % parameter/value pairs specified in the call to feval. (I.e.
-            % it should use the inputParser object, with StructExpand=true,
+            % it could use the inputParser object, with StructExpand=true,
             % to interpret all but its first input argument).
-            %
-            % EXAMPLE
-            % o.feval('rand',1:10) % Calls rand(1) on one worker, rand(2)
-            % on another, etc. until rand(10) on the 100th worker.
-            % o.feval('myfun',data,'mode','fast')
-            % Will call myfun(data(1),'mode','fast')) on one worker,
-            % and myfun(data(2),'mode','fast') on another.
             %
             % The following parm/value pairs control SLURM scheduling and
             % are not passed to the function
@@ -358,11 +351,31 @@ classdef slurm < handle
             % Useful if the mfile you're executing is self-contained and
             % does not yet exist on the server. Note that it will be copied
             % to the .remoteStorage location, which is the working
-            % directory of the jobs.
+            % directory of the jobs.            
             %
             % To retrieve the output each of the evaluations of fun, this
             % funciton returns a unique 'tag' that can be passed to
             % slurm.retrieve().
+            %
+            %
+            % EXAMPLE
+            % o.feval('rand',1:10) % Calls rand(1) on one worker, rand(2)
+            % on another, etc. until rand(10) on the 100th worker.
+            % o.feval('myfun',data,'mode','fast')
+            % Will call myfun(data(1),'mode','fast')) on one worker,
+            % and myfun(data(2),'mode','fast') on another.
+            %
+            % EXAMPLE 
+            % The pctdemo_task_blackjack function takes two input
+            % arguments, the number of hands to play, and how often to
+            % repeat this. To play 100 hands 1000 times on 5 nodes, use:
+            %  data = repmat([100 1000],[5 1]);
+            % Each worker will receive one row of this matrix as the input
+            % to the blackjack function. The item in the first column as the first input
+            % argument, the item in the second column as the second input argument.
+            % o.feval('pctdemo_task_blackjack',data,'copy',true)
+            %
+            
             
             % Name the job after the current time. Assuming this will be
             % unique.
@@ -379,14 +392,16 @@ classdef slurm < handle
             end
             
             if isrow(data)
+                % This is interpreted as a column.
                 data = data';
             end
             
             if isnumeric(data)
-                data =num2cell(data,2);
+                %Make the data into a cell.
+                data =num2cell(data);
             end
             
-            nrDataJobs = numel(data);
+            nrDataJobs = size(data,1);
             jobName = [fun '-' uid];
             jobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
             % Create a (unique) directory on the head node to store data and results.
@@ -396,7 +411,6 @@ classdef slurm < handle
             % Save a local copy of the input data
             localDataFile = fullfile(o.localStorage,[uid '_data.mat']);
             remoteDataFile = strrep(fullfile(jobDir,[uid '_data.mat']),'\','/');
-            data = reshape(data,[nrDataJobs 1]); %#ok<NASGU> % Allow use of a (task,1) into the matFile in slurm.run
             save(localDataFile,'data','-v7.3'); % 7.3 needed to allow partial loading of the data in each worker.
             % Copy the data file to the cluster
             o.put(localDataFile,jobDir);
@@ -429,7 +443,7 @@ classdef slurm < handle
             end
             
             %% Start the jobs
-            o.sbatch('jobName',jobName,'uniqueID','auto','batchOptions',p.Results.batchOptions,'mfile','slurm.run','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobDir},'debug',p.Results.debug,'runOptions',p.Results.runOptions,'nrInArray',nrDataJobs,'taskNr',1);            
+            o.sbatch('jobName',jobName,'uniqueID','auto','batchOptions',p.Results.batchOptions,'mfile','slurm.fevalRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobDir},'debug',p.Results.debug,'runOptions',p.Results.runOptions,'nrInArray',nrDataJobs,'taskNr',1);            
             
         end
         
@@ -957,7 +971,7 @@ classdef slurm < handle
             end
         end
         
-        function run(jobID,taskNr,varargin) %#ok<INUSL>
+        function fevalRun(jobID,taskNr,varargin) %#ok<INUSL>
             % This function runs on the cluster in response to a call to slurm.feval on the client.
             % It is not meant to be called directly. See slurm.feval.
             %
@@ -994,13 +1008,10 @@ classdef slurm < handle
                 args = {};
             end
             % Load a single element of the data cell array from the matfile and
-            % pass it to the mfile, together with all the args. The user
-            % should specify an mfile that takes data{i} as its first
-            % input.
+            % pass it to the mfile, together with all the args. 
                      
-            data = dataMatFile.data(taskNr,1); % Must specify ,1 for a slice of a MatFile. And cannot use {}.           
-                     
-            result = feval(p.Results.mFile,data{1},args{:});
+            data = dataMatFile.data(taskNr,:); % Read a row from the cell array
+            result = feval(p.Results.mFile,data{:},args{:}); % Pass all cells of the row to the mfile as argument (plus optional args)
             
             % Save the result in the jobDir as 1.result.mat, 2.result.mat
             % etc.
