@@ -378,6 +378,9 @@ if ~isempty(handles.current.selection)
             data = handles.slurm.retrieve(tag);
             assignin('base','data',data)
             warning([ num2str(numel(data)) ' results of the job have been assigned to ''data''']);
+        case 'm'
+            % Retrieve an smap and show it in the editor
+            handles.slurm.smap;       
         otherwise
             % Unkown key, ignore
     end
@@ -396,5 +399,6 @@ set(hObject,'TooltipString',strcat(['<html> This GUI shows the accounting log of
                             ['Use keys to control jobs: <br> <b>o</b> opens a file showing Matlab command line output <br> <b>e</b> opens a file showing cluster and Matlab errors <br> '],...
                             ['<b>r</b> retries selected jobs (or all failed jobs when a group is selected) <br> <b>c</b> cancels selected jobs (or all running jobs when a group is selected)<br> '],...
                             ['<br> <b>g</b> retrieves the results of slurm.feval jobs (and assigns them to the ''data'' variable in the base workspace.br> '],...
+                            ['<br> <b>m</b> opens a file in the editor that shows the current usage of the cluster (smap) '],...
                             ['<HR>  BK -March 2015 </html> ']));
 end
