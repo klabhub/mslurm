@@ -331,7 +331,7 @@ classdef slurm < handle
             
         end
         function jobName = feval(o,fun,data,varargin)
-            % Evaluate the function fun on each of the elements of the
+            % Evaluate the function fun on each of the rows of the
             % array data.
             %
             % The mfile fun should be a function that takes each column of the 
@@ -370,8 +370,9 @@ classdef slurm < handle
             % arguments, the number of hands to play, and how often to
             % repeat this. To play 100 hands 1000 times on 5 nodes, use:
             %  data = repmat([100 1000],[5 1]);
-            % The first column of data will be passed as the first input
-            % argument, the second column as the second input argument.
+            % Each worker will receive one row of this matrix as the input
+            % to the blackjack function. The item in the first column as the first input
+            % argument, the item in the second column as the second input argument.
             % o.feval('pctdemo_task_blackjack',data,'copy',true)
             %
             
@@ -400,7 +401,7 @@ classdef slurm < handle
                 data =num2cell(data);
             end
             
-            nrDataJobs = numel(data);
+            nrDataJobs = size(data,1);
             jobName = [fun '-' uid];
             jobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
             % Create a (unique) directory on the head node to store data and results.
