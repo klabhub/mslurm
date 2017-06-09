@@ -1168,25 +1168,27 @@ classdef slurm < handle
             % Load a single element from the file that specifieof the data cell array from the matfile and
             % pass it to the mfile, together with all the args. 
                      
-            inFile = fullfile(dataMatFile.inPath(taskNr,1),dataMatFile.inFile(taskNr,1)); 
+            inFile = dataMatFile.inFile(taskNr,1); 
+            inPath = dataMatFile.inPath(taskNr,1);
             outPath = dataMatFile.outPath;
-            outFile = fullfile(outPath,dataMatFile.outFile(taskNr,1)); 
+            outFile = dataMatFile.outFile(taskNr,1); 
+            filename = fullfile(inPath{1},inFile{1});
             
-            if ~exist(inFile,'file')
-                error(['File : ' inFile ' does not exist']);
+            if ~exist(filename,'file')
+                error(['File : ' filename ' does not exist']);
             end
             
-            if ~exist(outPath,'dir')
-                [success,message] = mkdir(outPath);
+            if ~exist(outPath{1},'dir')
+                [success,message] = mkdir(outPath{1});
                 if ~success
-                    error(['Failed to create output directory: ' outPath '(' message ')']);
+                    error(['Failed to create output directory: ' outPath{1} '(' message ')']);
                 end
             end
             
-            result = feval(p.Results.mFile,inFile,args{:}); % Pass input file and optional args 
+            result = feval(p.Results.mFile,filename,args{:}); % Pass input file and optional args 
             
             % Save the result first locally then scp to outPath 
-            slurm.saveResult(outFile,result,p.Results.nodeTempDir,outPath);
+            slurm.saveResult(outFile{1},result,p.Results.nodeTempDir,outPath);
         end
         
         
