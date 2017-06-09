@@ -349,16 +349,40 @@ classdef slurm < handle
             % file to process the file and then saves the results in an
             % output file. 
             % 
-            % The data transfer between client and server necesary for this
-            % to really work would be done outside matlab (e.g. by rsyncing
-            % two directories for file input and output).
-            % The 'fun' should be a function that takes a filename
+            % The first input argument 'fun' should be a function that takes a filename
             % (complete with path) as its first input, and returns a single
             % ouput. This single output will be saved to the output file. 
-            % Additional inputs to func can be specified as parameter/value
-            % pairs
-            % EXAMPLE 
+            % Additional inputs to 'fun' can be specified as parameter/value
+            % pairs.
+            %
+            % Input args: (parm/value pairs).
+            % 'inFile' -  a cell array of file names to process
+            % 'inPath'  -  a single path (that exists on the server) 
+            % 'outTag' - This tag will be appended to the output filename                  
+            % 'outPath' - a single path to which the restuls will be
+            % written.
+            %
+            % Slurm options can be specified as
+            % 'batchOptions'   -see slurm.sbatch
+            % 'runOptions' - see slurm.sbatch
             % 
+            % If the 'fun' is self-contained you can copy it to the server
+            % with 'copy' set to true.
+            % 
+            % EXAMPLE 
+            % o.fileInFileOut('preprocess','inFile',{'f1.mat','f2.mat','f3.mat',f4.mat','f5.mat'},'inPath','/work/data/','outPath','/work/results/','outTag','.preprocessed','mode',1)
+            % Will start jobs that calls the preprocess function like this
+            % (for each fo the f1..f5)
+            % results = preprocess('/work/data/f1.mat','mode',1);
+            % (Note how the 'mode' argument is passed to the user
+            % defined preprocess function: all parm/value pairs that are
+            % note recognized by the fileInFileOut function are passed that
+            % way).
+            % After completing the job, the results will be saved in
+            % /work/results/f1.preprocessed.mat
+            % 
+            % 
+            
             p=inputParser;
             p.addParameter('inFile','',@(x) (ischar(x)|| iscell(x)));
             p.addParameter('inPath','',@ischar);
@@ -1198,7 +1222,7 @@ classdef slurm < handle
             % Save a result first on a tempDir on the node, then copy it to
             % the head node, using scp. Used by slurm.run
             [p,f,e] = fileparts(filename);
-            if isempty(e)
+            if isempty(e) % Force an extension
                 e ='.mat';
                 filename = [p f e];
             end
