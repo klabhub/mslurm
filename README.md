@@ -26,3 +26,5 @@ and add it to your Matlab install on the client.
 
 ## Usage
 See slurmExample.m in the mslurm directory for a commented example how to use the toolbox.
+
+The slurm.sbatch function is the low-level workhorse that cant submit any Matlab job to SLURM. But to make this useful you will want to specify what each of those jobs have to do. For simple jobs you could directly pass arguments to sbatch, but for anything more complicated you will probably want to write some files that contain parameters for each of the jobs. The slurm.feval and slurm.fileInFileOut are two example workflows; use them as is or modify them to match your workflow.
