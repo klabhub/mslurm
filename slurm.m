@@ -318,7 +318,18 @@ classdef slurm < handle
                 end
             end
         end
-        
+        function fileInFileOut(o,fun,varargin)
+            p=inputParser;
+            p.addParameter('inFile','',@(x) (ischar(x)|| iscell(x)));
+            p.addParameter('inPath','',@(x) (ischar(x)|| iscell(x)));
+            p.addParameter('outFile','',@(x) (ischar(x)|| iscell(x)));
+            p.addParameter('outPath','',@(x) (ischar(x)|| iscell(x)));                        
+            p.parse(varargin{:});
+            
+            
+            
+            
+        end
         function jobName = feval(o,fun,data,varargin)
             % Evaluate the function fun on each of the elements of the
             % array data.
@@ -366,6 +377,15 @@ classdef slurm < handle
                 % separate worker).
                 data = {data};
             end
+            
+            if isrow(data)
+                data = data';
+            end
+            
+            if isnumeric(data)
+                data =num2cell(data,2);
+            end
+            
             nrDataJobs = numel(data);
             jobName = [fun '-' uid];
             jobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
@@ -973,11 +993,11 @@ classdef slurm < handle
             else
                 args = {};
             end
-            % Load a single element of the data array from the matfile and
+            % Load a single element of the data cell array from the matfile and
             % pass it to the mfile, together with all the args. The user
-            % should specify an mfile that takes data(i) as its first
+            % should specify an mfile that takes data{i} as its first
             % input.
-            result = feval(p.Results.mFile,dataMatFile.data(taskNr,1),args{:});
+            result = feval(p.Results.mFile,dataMatFile.data{taskNr,1},args{:});
             
             % Save the result in the jobDir as 1.result.mat, 2.result.mat
             % etc.
