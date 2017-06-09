@@ -375,6 +375,7 @@ classdef slurm < handle
             % o.feval('pctdemo_task_blackjack',data,'copy',true)
             %
             
+            
             % Name the job after the current time. Assuming this will be
             % unique.
             uid = datestr(now,'yy.mm.dd_HH.MM.SS.FFF');
@@ -396,7 +397,7 @@ classdef slurm < handle
             
             if isnumeric(data)
                 %Make the data into a cell.
-                data =num2cell(data,2);
+                data =num2cell(data);
             end
             
             nrDataJobs = numel(data);
@@ -409,7 +410,6 @@ classdef slurm < handle
             % Save a local copy of the input data
             localDataFile = fullfile(o.localStorage,[uid '_data.mat']);
             remoteDataFile = strrep(fullfile(jobDir,[uid '_data.mat']),'\','/');
-            data = reshape(data,[nrDataJobs 1]); %#ok<NASGU> % Allow use of a (task,1) into the matFile in slurm.run
             save(localDataFile,'data','-v7.3'); % 7.3 needed to allow partial loading of the data in each worker.
             % Copy the data file to the cluster
             o.put(localDataFile,jobDir);
@@ -1009,8 +1009,8 @@ classdef slurm < handle
             % Load a single element of the data cell array from the matfile and
             % pass it to the mfile, together with all the args. 
                      
-            data = dataMatFile.data(taskNr,1); % Must specify ,1 for a slice of a MatFile. And cannot use {}.                                
-            result = feval(p.Results.mFile,data{:},args{:});
+            data = dataMatFile.data(taskNr,:); % Read a row from the cell array
+            result = feval(p.Results.mFile,data{:},args{:}); % Pass all cells of the row to the mfile as argument (plus optional args)
             
             % Save the result in the jobDir as 1.result.mat, 2.result.mat
             % etc.
