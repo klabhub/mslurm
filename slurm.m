@@ -1197,7 +1197,11 @@ classdef slurm < handle
         function saveResult(filename,result,tempDir,jobDir) %#ok<INUSL>
             % Save a result first on a tempDir on the node, then copy it to
             % the head node, using scp. Used by slurm.run
-            
+            [p,f,e] = fileparts(filename);
+            if isempty(e)
+                e ='.mat';
+                filename = [p f e];
+            end
             fName =fullfile(tempDir,filename);
             save(fName,'result');
             % Copy to head
