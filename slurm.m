@@ -1178,8 +1178,8 @@ classdef slurm < handle
                 error(['File : ' filename ' does not exist']);
             end
             
-            if ~exist(outPath{1},'dir')
-                [success,message] = mkdir(outPath{1});
+            if ~exist(outPath,'dir')
+                [success,message] = mkdir(outPath);
                 if ~success
                     error(['Failed to create output directory: ' outPath{1} '(' message ')']);
                 end
