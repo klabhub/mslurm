@@ -376,12 +376,15 @@ classdef slurm < handle
             % results = preprocess('/work/data/f1.mat','mode',1);
             % (Note how the 'mode' argument is passed to the user
             % defined preprocess function: all parm/value pairs that are
-            % note recognized by the fileInFileOut function are passed that
+            % not recognized by the fileInFileOut function are passed that
             % way).
             % After completing the job, the results will be saved in
             % /work/results/f1.preprocessed.mat
             % 
-            % 
+            % The user is responsible for making sure that the f1.mat etc.
+            % exust in 'inPath' on the server, and for retrieving the
+            % results from the 'outPath'. (Presumably using something like 
+            % rsync, otuside Matlab. 
             
             p=inputParser;
             p.addParameter('inFile','',@(x) (ischar(x)|| iscell(x)));
@@ -473,6 +476,7 @@ classdef slurm < handle
             % parameter/value pairs specified in the call to feval. (I.e.
             % it could use the inputParser object, with StructExpand=true,
             % to interpret all but its first input argument).
+            % 'data' must be a numeric, cell, or struct array.
             %
             % The following parm/value pairs control SLURM scheduling and
             % are not passed to the function
@@ -493,22 +497,52 @@ classdef slurm < handle
             %
             %
             % EXAMPLE
-            % o.feval('rand',1:10) % Calls rand(1) on one worker, rand(2)
-            % on another, etc. until rand(10) on the 100th worker.
-            % o.feval('myfun',data,'mode','fast')
-            % Will call myfun(data(1),'mode','fast')) on one worker,
-            % and myfun(data(2),'mode','fast') on another.
+            % data = 10x1 struct array with your data.
+            % analyzeMyData = a function that takes one element of the
+            % struct array as its input, and returns one output (any matlab
+            % variable).
+            % 
+            % tag = o.feval('analyzeMyData',data);
+            % will copy the data struct to the server, then start 10 jobs,
+            % the first job/worker  will evaluate 
+            % output1 = analyzeMyData(data(1));
+            % the second worker;
+            % output2 = analyzeMyData(data(2));
+            % etc, 
+            % Once everything has completed (check slurmGui) you can get
+            % the results with 
+            % results = o.retrieve(tag);
+            %  In tis example results{1} will contain output1, results{2}
+            %  will contain output2 etc.  
+            %
+            % Here is a specific example where we use a numeric data input 
+            % data = 1:10; 
+            % i.e. worker 1 will get '1' as its input, worker 2 will get
+            % '2' etc, 
+            % and the analysis that we do on this data is the function
+            % 'rand'. 
+            % data = 1:10; 
+            % tag = o.feval('rand',data) %
+            % % Wait a while...
+            % results  = retrieve(tag);
+            % results{1} will contain the result of rand(1);
+            % results{2} = rand(2);
+            % ...
+            % results{10} = rand(10);
+            %
             %
             % EXAMPLE 
             % The pctdemo_task_blackjack function takes two input
             % arguments, the number of hands to play, and how often to
-            % repeat this. To play 100 hands 1000 times on 5 nodes, use:
-            %  data = repmat([100 1000],[5 1]);
+            % repeat this. To play 100 hands 1000 times on 3 nodes, use:
+            %  data = [100 1000; 100 1000; 100 1000];
             % Each worker will receive one row of this matrix as the input
             % to the blackjack function. The item in the first column as the first input
             % argument, the item in the second column as the second input argument.
-            % tag = o.feval('pctdemo_task_blackjack',data,'copy',true)
-            % results  = o.retrieve(tag);  % Once it is done.
+            % tag = o.feval('pctdemo_task_blackjack',data,'copy',true);
+            % results  = o.retrieve(tag);  % Once it is done, use this to
+            % retrieve the (3) results.
+            % 
             
             
             % Name the job after the current time. Assuming this will be
@@ -517,6 +551,10 @@ classdef slurm < handle
             if ~ischar(fun)
                 error('The fun argument must be the name of an m-file');
             end
+            if ~(iscell(data) || isnumeric(data) || isstruct(data))
+                error('Data must be numeric, cell, or struct');
+            end
+                
             %% Prepare job directories with data and args
             if ischar(data)
                 % Assume that a single string input means pass this string
@@ -1145,6 +1183,14 @@ classdef slurm < handle
             % pass it to the mfile, together with all the args. 
                      
             data = dataMatFile.data(taskNr,:); % Read a row from the cell array
+            if isstruct(data)
+                data = {data};
+            else %- cannot happen.. numeric is converted to cell in
+                %feval and cell stays cell
+                error(['The data in ' dataFile ' has the wrong type: ' class(data) ]);
+            end
+                
+                
             result = feval(p.Results.mFile,data{:},args{:}); % Pass all cells of the row to the mfile as argument (plus optional args)
             
             % Save the result in the jobDir as 1.result.mat, 2.result.mat
