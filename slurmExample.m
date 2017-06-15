@@ -24,6 +24,15 @@ data = 10*ones(nrWorkers,1);
 options = {'partition','test'}; % Specify a partition and antyhing else the sbatch will accept (e.g. memory requirements)
 tag = cls.feval('rand',data,'batchOptions',options); % This will call rand(data(1)) in one matlab sesssion, rand(data(2)) in another etc.
 
+% Another example, using  a data struct array
+
+% We have reaction time data from 3 subjects.
+data = struct('name',{'Joe','Bill','Mary'},'rt',{[200 300 100],[200 333 1123],[123 300 200]});
+% We want to use a cluster to analyze the data from each subject in a separate job.
+tag = s.feval('slurmAnalyzeRt',data);
+% See slurmAnalyzeRt for 
+
+
 % Click refresh in the slurmGui to see these jobs
 % Once they have completed, you can retrieve the results with 
 results = cls.retrieve(tag);
