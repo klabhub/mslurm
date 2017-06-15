@@ -11,7 +11,7 @@ if ~isstruct(data) || ~numel(data)==1 || ~isfield(data,'rt')
     error('slurmAnalyzeRt requires a single data struct as its input');
 end
 
-% The analysis. 
-result  = mean(rt);
+% The analysis.
+result  = mean(data.rt);
 
 end

@@ -30,8 +30,10 @@ tag = cls.feval('rand',data,'batchOptions',options); % This will call rand(data(
 data = struct('name',{'Joe','Bill','Mary'},'rt',{[200 300 100],[200 333 1123],[123 300 200]});
 % We want to use a cluster to analyze the data from each subject in a separate job.
 tag = s.feval('slurmAnalyzeRt',data);
-% See slurmAnalyzeRt for 
-
+% The slurmAnalyzeRt m functon is a simple function that takes one of the
+% elements of the struct array as its input, and computes the mean reaction
+% time.
+meanRt = s.retrieve(tag)
 
 % Click refresh in the slurmGui to see these jobs
 % Once they have completed, you can retrieve the results with 
