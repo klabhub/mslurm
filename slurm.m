@@ -11,10 +11,10 @@
 % s.user = 'username'
 % s.keyfile = 'mySSH_id_rsa'
 % slurm.m creates files that are stored in .localStorage
-% s.localSotrage  = 'c:/temp/jobStorage/'; 
+% s.localSotrage  = 'c:/temp/jobStorage/';
 % These files are copied to the cluster in .remoteStorage
 % s.remoteStorage = '~/jobStorage/'
-% s.nodeTempDir = '/scratch/' % A directory where results can be written on the nodes 
+% s.nodeTempDir = '/scratch/' % A directory where results can be written on the nodes
 % before they are copied to the head node)
 % s.connect ; % Check that we can connect.
 % % Assume that the mfile 'myComputation.m' exists on the cluster, it takes
@@ -23,9 +23,9 @@
 % 'myComputation' for each of these data sets. To achieve this, type:
 % tag = s.feval('myComputation',data);
 % This will start one worker/job for each element of data. 'tag' identifies
-% this partticular set of jobs. 
-% 
-% Once the jobs have completed you retrieve the results using 
+% this partticular set of jobs.
+%
+% Once the jobs have completed you retrieve the results using
 %  results = s.retrieve(tag)
 %
 % See also slurmGui.
@@ -37,14 +37,14 @@ classdef slurm < handle
     
     properties (SetAccess=public, GetAccess=public)
         remoteStorage@char  = ''; % Location on HPC Cluster where scripts and logs will be written
-        localStorage@char   = ''; % Location on client where logs and scripts will be written 
+        localStorage@char   = ''; % Location on client where logs and scripts will be written
         host@char           = ''; % Host Address
         user@char           = ''; % Remote user name
         keyfile@char        = ''; % Name of the SSH key file. (full name)
         from                = now - 1; % Retrieve logs from this time (use datenum format)
         to                  = Inf; % Until this time.
         nodeTempDir         = '';  % The path to a directory on a node that can be used to save data temporarily (e.g. /scratch/)
-        headRootDir         = '';  % The path to the directory on the head node where results can be copied        
+        headRootDir         = '';  % The path to the directory on the head node where results can be copied
     end
     
     properties (Dependent,SetAccess=protected)
@@ -116,7 +116,7 @@ classdef slurm < handle
     end
     
     %% Public Methods
-    methods (Access=public)              
+    methods (Access=public)
         function o = slurm
             % Constructor. Does not do anything except checking that shh2 is installed.
             if isempty(which('ssh2'))
@@ -128,7 +128,7 @@ classdef slurm < handle
         
         function delete(o)
             % Destructor. Makes sure we close the SSH connection
-            close(o);            
+            close(o);
         end
         
         
@@ -202,6 +202,33 @@ classdef slurm < handle
             o.ssh = scp_put(o.ssh,filename,remoteDir,localPath,filename);
         end
         
+        function get(o,files,localJobDir,remoteJobDir,deleteRemote)
+            if ischar(files)
+                files= {files};
+            end
+            if nargin<5
+                deleteRemote = false;
+                if nargin < 4
+                    remoteJobDir = o.remoteStorage;
+                    if nargn <3
+                        localJobDir = o.localStorage;
+                    end
+                end
+            end
+            disp('Starting data transfer...')
+            o.ssh = scp_get(o.ssh,files,localJobDir,remoteJobDir);
+            disp('Data transfer done.')
+            
+            %% cleanup if requested
+            if deleteRemote
+                disp('Deleting remote files')
+                 o.command(['cd ' remoteJobDir ]);
+                for i=1:numel(files)
+                    o.command([' rm ' files{i} ]);
+                end
+            end
+            
+        end
         
         function connect(o)
             % Connect to the remote HPC cluster
@@ -225,8 +252,8 @@ classdef slurm < handle
             % See https://slurm.schedmd.com/smap.html
             % EXAMPLE:
             % o.smap  ; % Show current usage
-            % o.smap('-D s')  ; Show a list of partitions            
-
+            % o.smap('-D s')  ; Show a list of partitions
+            
             if nargin <2
                 options ='';
             end
@@ -234,12 +261,12 @@ classdef slurm < handle
             filename = ['smap.output.' uid '.txt'];
             results = o.command([' smap ' options ' -c > ' o.remoteStorage '/' filename]);
             try
-                o.ssh = scp_get(o.ssh,filename,o.localStorage,o.remoteStorage);            
+                o.ssh = scp_get(o.ssh,filename,o.localStorage,o.remoteStorage);
                 o.command(['rm ' o.remoteStorage '/' filename]);
-            catch 
+            catch
                 disp('Failed to perform an smap');
             end
-            localFile = fullfile(o.localStorage,filename);            
+            localFile = fullfile(o.localStorage,filename);
             edit(localFile);
             delete(localFile);
         end
@@ -253,7 +280,7 @@ classdef slurm < handle
             %
             % tag = the tag (unique id) that identifies the job (returned
             % by slurm.feval)
-            % 
+            %
             % Pressing the 'g' key in the slurmGUI calls this function
             %
             % Parm/value
@@ -298,7 +325,7 @@ classdef slurm < handle
                     return
                 end
             end
-
+            
             %% Check what;s available remotely and transfer.
             remoteJobDir = strrep(fullfile(o.remoteStorage,tag),'\','/');
             files = o.command(['cd ' remoteJobDir '; ls *.result.mat']);
@@ -309,18 +336,16 @@ classdef slurm < handle
                     if ~success
                         error(['Failed to create local directory to store the results: ' message]);
                     end
-                end                
-                disp('Starting data transfer...')
-                o.ssh = scp_get(o.ssh,files,localJobDir,remoteJobDir);
-                disp('Data transfer done.')
+                end
+                get(o,files,localJobDir,remoteJobDir);
             else
                 warning(['No files in job directory: ' remoteJobDir]);
                 return;
             end
             
             
-            %% We have the files locally. Now read them and put the results 
-            % in a cell array. Job n goes into the nth element of the cell array.            
+            %% We have the files locally. Now read them and put the results
+            % in a cell array. Job n goes into the nth element of the cell array.
             match = regexp(files,'(?<nr>\d+)\.result\.mat','names');
             match = [match{:}];
             nr = str2num(char(match.nr)); %#ok<ST2NM>
@@ -335,8 +360,8 @@ classdef slurm < handle
             if p.Results.deleteRemote
                 for i=1:numel(files)
                     o.command(['cd ' remoteJobDir '; rm ' files{i} ]);
-                end                
-            end            
+                end
+            end
             if p.Results.deleteLocal
                 [success,message]= rmdir(localJobDir,'s');
                 if ~success
@@ -347,29 +372,29 @@ classdef slurm < handle
         function fileInFileOut(o,fun,varargin)
             % This function takes a list of files, generates one job per
             % file to process the file and then saves the results in an
-            % output file. 
-            % 
+            % output file.
+            %
             % The first input argument 'fun' should be a function that takes a filename
             % (complete with path) as its first input, and returns a single
-            % ouput. This single output will be saved to the output file. 
+            % ouput. This single output will be saved to the output file.
             % Additional inputs to 'fun' can be specified as parameter/value
             % pairs.
             %
             % Input args: (parm/value pairs).
             % 'inFile' -  a cell array of file names to process
-            % 'inPath'  -  a single path (that exists on the server) 
-            % 'outTag' - This tag will be appended to the output filename                  
+            % 'inPath'  -  a single path (that exists on the server)
+            % 'outTag' - This tag will be appended to the output filename
             % 'outPath' - a single path to which the restuls will be
             % written.
             %
             % Slurm options can be specified as
             % 'batchOptions'   -see slurm.sbatch
             % 'runOptions' - see slurm.sbatch
-            % 
+            %
             % If the 'fun' is self-contained you can copy it to the server
             % with 'copy' set to true.
-            % 
-            % EXAMPLE 
+            %
+            % EXAMPLE
             % o.fileInFileOut('preprocess','inFile',{'f1.mat','f2.mat','f3.mat',f4.mat','f5.mat'},'inPath','/work/data/','outPath','/work/results/','outTag','.preprocessed','mode',1)
             % Will start jobs that calls the preprocess function like this
             % (for each fo the f1..f5)
@@ -380,21 +405,21 @@ classdef slurm < handle
             % way).
             % After completing the job, the results will be saved in
             % /work/results/f1.preprocessed.mat
-            % 
+            %
             % The user is responsible for making sure that the f1.mat etc.
             % exust in 'inPath' on the server, and for retrieving the
-            % results from the 'outPath'. (Presumably using something like 
-            % rsync, otuside Matlab. 
+            % results from the 'outPath'. (Presumably using something like
+            % rsync, otuside Matlab.
             
             p=inputParser;
             p.addParameter('inFile','',@(x) (ischar(x)|| iscell(x)));
             p.addParameter('inPath','',@ischar);
             p.addParameter('outTag','.processed',@ischar);
-            p.addParameter('outPath','',@ischar);                        
+            p.addParameter('outPath','',@ischar);
             p.addParameter('batchOptions',{});
             p.addParameter('runOptions','');
             p.addParameter('debug',false);
-            p.addParameter('copy',false);            
+            p.addParameter('copy',false);
             p.KeepUnmatched = true;
             p.parse(varargin{:});
             
@@ -418,8 +443,8 @@ classdef slurm < handle
             % Out files are infile+tag
             outFile= cell(size(inFile));
             for i=1:nrFiles
-                    [~,f,e] = fileparts(inFile{i});
-                    outFile{i} = [f p.Results.outTag e];
+                [~,f,e] = fileparts(inFile{i});
+                outFile{i} = [f p.Results.outTag e];
             end
             outPath = p.Results.outPath;     %#ok<NASGU>
             
@@ -455,23 +480,23 @@ classdef slurm < handle
             end
             
             if p.Results.copy
-                % Copy the mfile to remote storage. 
+                % Copy the mfile to remote storage.
                 mfilename = which(fun);
                 o.put(mfilename,o.remoteStorage);
             end
             
             %% Start the jobs
-            o.sbatch('jobName',jobName,'uniqueID','auto','batchOptions',p.Results.batchOptions,'mfile','slurm.fileInFileOutRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir},'debug',p.Results.debug,'runOptions',p.Results.runOptions,'nrInArray',nrFiles,'taskNr',1);            
+            o.sbatch('jobName',jobName,'uniqueID','auto','batchOptions',p.Results.batchOptions,'mfile','slurm.fileInFileOutRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir},'debug',p.Results.debug,'runOptions',p.Results.runOptions,'nrInArray',nrFiles,'taskNr',1);
             
             
         end
         
-    
+        
         function jobName = feval(o,fun,data,varargin)
             % Evaluate the function fun on each of the rows of the
             % array data.
             %
-            % The mfile fun should be a function that takes each column of the 
+            % The mfile fun should be a function that takes each column of the
             % the data array as an input, plus optionally any
             % parameter/value pairs specified in the call to feval. (I.e.
             % it could use the inputParser object, with StructExpand=true,
@@ -484,12 +509,12 @@ classdef slurm < handle
             %                   slurm.sbatch
             % 'runOptions'  = also passed to slurm. See slurm.sbatch
             %
-            % 
+            %
             % 'copy' set to true to copy the mfile (fun) to the server.
             % Useful if the mfile you're executing is self-contained and
             % does not yet exist on the server. Note that it will be copied
             % to the .remoteStorage location, which is the working
-            % directory of the jobs.            
+            % directory of the jobs.
             %
             % To retrieve the output each of the evaluations of fun, this
             % funciton returns a unique 'tag' that can be passed to
@@ -501,27 +526,27 @@ classdef slurm < handle
             % analyzeMyData = a function that takes one element of the
             % struct array as its input, and returns one output (any matlab
             % variable).
-            % 
+            %
             % tag = o.feval('analyzeMyData',data);
             % will copy the data struct to the server, then start 10 jobs,
-            % the first job/worker  will evaluate 
+            % the first job/worker  will evaluate
             % output1 = analyzeMyData(data(1));
             % the second worker;
             % output2 = analyzeMyData(data(2));
-            % etc, 
+            % etc,
             % Once everything has completed (check slurmGui) you can get
-            % the results with 
+            % the results with
             % results = o.retrieve(tag);
             %  In tis example results{1} will contain output1, results{2}
-            %  will contain output2 etc.  
+            %  will contain output2 etc.
             %
-            % Here is a specific example where we use a numeric data input 
-            % data = 1:10; 
+            % Here is a specific example where we use a numeric data input
+            % data = 1:10;
             % i.e. worker 1 will get '1' as its input, worker 2 will get
-            % '2' etc, 
+            % '2' etc,
             % and the analysis that we do on this data is the function
-            % 'rand'. 
-            % data = 1:10; 
+            % 'rand'.
+            % data = 1:10;
             % tag = o.feval('rand',data) %
             % % Wait a while...
             % results  = retrieve(tag);
@@ -531,7 +556,7 @@ classdef slurm < handle
             % results{10} = rand(10);
             %
             %
-            % EXAMPLE 
+            % EXAMPLE
             % The pctdemo_task_blackjack function takes two input
             % arguments, the number of hands to play, and how often to
             % repeat this. To play 100 hands 1000 times on 3 nodes, use:
@@ -542,7 +567,7 @@ classdef slurm < handle
             % tag = o.feval('pctdemo_task_blackjack',data,'copy',true);
             % results  = o.retrieve(tag);  % Once it is done, use this to
             % retrieve the (3) results.
-            % 
+            %
             
             
             % Name the job after the current time. Assuming this will be
@@ -554,7 +579,7 @@ classdef slurm < handle
             if ~(iscell(data) || isnumeric(data) || isstruct(data))
                 error('Data must be numeric, cell, or struct');
             end
-                
+            
             %% Prepare job directories with data and args
             if ischar(data)
                 % Assume that a single string input means pass this string
@@ -591,7 +616,7 @@ classdef slurm < handle
             p.addParameter('batchOptions',{});
             p.addParameter('runOptions','');
             p.addParameter('debug',false);
-            p.addParameter('copy',false);            
+            p.addParameter('copy',false);
             p.KeepUnmatched = true;
             p.parse(varargin{:});
             
@@ -609,13 +634,13 @@ classdef slurm < handle
             end
             
             if p.Results.copy
-                % Copy the mfile to remote storage. 
+                % Copy the mfile to remote storage.
                 mfilename = which(fun);
                 o.put(mfilename,o.remoteStorage);
             end
             
             %% Start the jobs
-            o.sbatch('jobName',jobName,'uniqueID','auto','batchOptions',p.Results.batchOptions,'mfile','slurm.fevalRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobDir},'debug',p.Results.debug,'runOptions',p.Results.runOptions,'nrInArray',nrDataJobs,'taskNr',1);            
+            o.sbatch('jobName',jobName,'uniqueID','auto','batchOptions',p.Results.batchOptions,'mfile','slurm.fevalRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobDir},'debug',p.Results.debug,'runOptions',p.Results.runOptions,'nrInArray',nrDataJobs,'taskNr',1);
             
         end
         
@@ -675,7 +700,7 @@ classdef slurm < handle
             % load this file and use the first argument to pull some subset
             % of parameters  from the file that should be used for a particular
             % matlab session on the cluster.
-            % 
+            %
             % See also slurm/feval for an example function that uses
             % slurm/sbatch to submit jobs to the scheduler.
             
@@ -873,7 +898,7 @@ classdef slurm < handle
         
         
         function [groups,groupIx,subs,jobIx]=jobGroups(o,expression)
-            % Often jobs belong together in a group. By using convention 
+            % Often jobs belong together in a group. By using convention
             % jobName =  Job-SubJob, the 'group' (job) and its elements (subjob)
             % can be determined from the jobName. This is used by slurmGui to make the
             % interaction with the logs less cluttered.
@@ -905,7 +930,7 @@ classdef slurm < handle
             % Retrieve a log file from the cluster. This can be the redirected
             % stdout (type =out) or stderr (type=err). (Although currently
             % sbatch writes both out and err to the same .out file so the
-            % 'out' logfile has all the information.       
+            % 'out' logfile has all the information.
             % Input
             % jobId  = jobID
             % 'element' =  element of a job array (ignored for non-array batch
@@ -947,9 +972,9 @@ classdef slurm < handle
                     warning(['File does not exist: ' remoteName]);
                     return;
                 end
-            end            
+            end
             %% Open in editor
-            edit(localName);            
+            edit(localName);
         end
         
         
@@ -1148,13 +1173,13 @@ classdef slurm < handle
             % It is not meant to be called directly. See slurm.feval.
             %
             % It will run a specified mfile on an element of the specified data array
-            % INPUT: 
+            % INPUT:
             % jobID = slurm job id
             % taskNr = The number of this job in the array of jobs. This
             % number is used to pick one item from the data array.
-            % 
+            %
             % Other properties are specified as parm/value pairs
-            % 
+            %
             % 'mfile'  - The Mfile that will be run,.
             % 'datafile'  - File containing the that will be passed to
             % mfile.
@@ -1180,8 +1205,8 @@ classdef slurm < handle
                 args = {};
             end
             % Load a single element of the data cell array from the matfile and
-            % pass it to the mfile, together with all the args. 
-                     
+            % pass it to the mfile, together with all the args.
+            
             data = dataMatFile.data(taskNr,:); % Read a row from the cell array
             if isstruct(data)
                 data = {data};
@@ -1189,8 +1214,8 @@ classdef slurm < handle
                 %feval and cell stays cell
                 error(['The data in ' dataFile ' has the wrong type: ' class(data) ]);
             end
-                
-                
+            
+            
             result = feval(p.Results.mFile,data{:},args{:}); % Pass all cells of the row to the mfile as argument (plus optional args)
             
             % Save the result in the jobDir as 1.result.mat, 2.result.mat
@@ -1199,7 +1224,7 @@ classdef slurm < handle
         end
         
         
-            
+        
         function fileInFileOutRun(jobID,taskNr,varargin) %#ok<INUSL>
             % This function runs on the cluster in response to a call to slurm.fileInFileOut on the client.
             % It is not meant to be called directly. call
@@ -1208,13 +1233,13 @@ classdef slurm < handle
             % It will run a specified mfile on a file, and save the results
             % in a different file.
             %
-            % INPUT: 
+            % INPUT:
             % jobID = slurm job id
             % taskNr = The number of this job in the array of jobs. This
             % number is used to pick one item from array of files.
-            % 
+            %
             % Other properties are specified as parm/value pairs
-            % 
+            %
             % 'mfile'  - The Mfile that will be run,.
             % 'datafile'  - File containing the list of files to process.
             % 'argsFile'  - File containing the extra input arguments for
@@ -1236,12 +1261,12 @@ classdef slurm < handle
                 args = {};
             end
             % Load a single element from the file that specifieof the data cell array from the matfile and
-            % pass it to the mfile, together with all the args. 
-                     
-            inFile = dataMatFile.inFile(taskNr,1); 
+            % pass it to the mfile, together with all the args.
+            
+            inFile = dataMatFile.inFile(taskNr,1);
             inPath = dataMatFile.inPath(taskNr,1);
             outPath = dataMatFile.outPath;
-            outFile = dataMatFile.outFile(taskNr,1); 
+            outFile = dataMatFile.outFile(taskNr,1);
             filename = fullfile(inPath{1},inFile{1});
             
             if ~exist(filename,'file')
@@ -1255,9 +1280,9 @@ classdef slurm < handle
                 end
             end
             
-            result = feval(p.Results.mFile,filename,args{:}); % Pass input file and optional args 
+            result = feval(p.Results.mFile,filename,args{:}); % Pass input file and optional args
             
-            % Save the result first locally then scp to outPath 
+            % Save the result first locally then scp to outPath
             slurm.saveResult(outFile{1},result,p.Results.nodeTempDir,outPath);
         end
         
