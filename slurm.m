@@ -1210,9 +1210,9 @@ classdef slurm < handle
             data = dataMatFile.data(taskNr,:); % Read a row from the cell array
             if isstruct(data)
                 data = {data};
-            else %- cannot happen.. numeric is converted to cell in
+            elseif ~iscell(data) %- cannot happen.. numeric is converted to cell in
                 %feval and cell stays cell
-                error(['The data in ' dataFile ' has the wrong type: ' class(data) ]);
+                error(['The data in ' p.Results.dataFile ' has the wrong type: ' class(data) ]);
             end
             
             
