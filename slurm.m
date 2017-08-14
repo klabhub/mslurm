@@ -576,8 +576,8 @@ classdef slurm < handle
             if ~ischar(fun)
                 error('The fun argument must be the name of an m-file');
             end
-            if ~(iscell(data) || isnumeric(data) || isstruct(data))
-                error('Data must be numeric, cell, or struct');
+            if ~(iscell(data) || isnumeric(data) || isstruct(data) || ischar(data))
+                error('Data must be char, numeric, cell, or struct');
             end
             
             %% Prepare job directories with data and args

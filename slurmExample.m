@@ -77,6 +77,11 @@ disp(['The file ' files{1} ' contains ' num2str(numel(result)) ' variables, with
 % the server is up to date
 mslurmPath = '~/Documents/MATLAB/mslurm';
 cls.gitpull(mslurmPath);  % Pull from the origin on git.
+% This could also be useful to make sure the code you developed on your
+% client is updated on the server. For instance, if your github repo for
+% your code lives in 
+myGithub = '~/Documents/MATLAB/users';
+cls.gitpull(myGithub);  % Pull from the origin on git.
 
 %% And for troubleshooting, the slurmDiagnosis function can come in handy
 % (you can edit/update it with your own diagnostic commands).
