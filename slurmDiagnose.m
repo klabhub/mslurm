@@ -45,6 +45,11 @@ for o=1:numel(options)
             disp('Path')
             path
             
+        case 'CONFIG'
+            % Type the slurm.conf file in the command prompt (so that is
+            % shows up in the log file in Matlab)
+            type /etc/slurm/slurm.conf
+            
             
             %case xxxx - extend this function here with new options
         otherwise
