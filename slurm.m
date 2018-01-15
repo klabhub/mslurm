@@ -576,8 +576,8 @@ classdef slurm < handle
             if ~ischar(fun)
                 error('The fun argument must be the name of an m-file');
             end
-            if ~(iscell(data) || isnumeric(data) || isstruct(data) || ischar(data))
-                error('Data must be char, numeric, cell, or struct');
+            if ~(iscell(data) || isnumeric(data) || isstruct(data))
+                error('Data must be numeric, cell, or struct');
             end
             
             %% Prepare job directories with data and args
@@ -617,6 +617,7 @@ classdef slurm < handle
             p.addParameter('runOptions','');
             p.addParameter('debug',false);
             p.addParameter('copy',false);
+            p.addParameter('deleteLocal',false,@islogical);
             p.KeepUnmatched = true;
             p.parse(varargin{:});
             
@@ -642,8 +643,115 @@ classdef slurm < handle
             %% Start the jobs
             o.sbatch('jobName',jobName,'uniqueID','auto','batchOptions',p.Results.batchOptions,'mfile','slurm.fevalRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobDir},'debug',p.Results.debug,'runOptions',p.Results.runOptions,'nrInArray',nrDataJobs,'taskNr',1);
             
+            %delete local copy right away instead of after succesful
+            %completion of the job
+           	if p.Results.deleteLocal
+                delete(localDataFile);
+            end
         end
         
+        
+        function [jobId,result] = taskBatch(o,fun,data,args,varargin)
+        %function result = taskBatch(o,fun,data,args,varargin)
+
+            %did the user provide additional inut arguments for the function they want
+            %to run on the cluster
+            if isempty(args)
+                error(['No input arguments provided for the function "' fun '" to run on the cluster. Provide at least "args.tasks" or consider using o.feval or o.sbatch instead of o.taskBatch.'])
+            end
+
+            %how many jobs should be submitted depends either on data or args
+            %(whichever has more, as long as one of them has several dimensions)
+            if isstruct(data) && isstruct(args)
+                if isequal(numel(data),numel(args)) %both struct arrays are of the same size
+                    nrInArray = numel(args);
+                elseif isequal((numel(data)+numel(args)),(max(numel(data),numel(args))+1)) %one is a struct array the other one is a struct
+                    nrInArray = max(numel(data),numel(args));
+                else
+                    error('If data and args are both struct arrays, then they must be of equal length. Otherwise only one of them can be a struct array and the other one must be a struct.')
+                end
+            elseif iscell(data)
+                if isempty(args)
+                    error('No input provided for "args". Either specify that variable or consider using either o.feval or o.sbatch instead of taskBatch to submit jobs.');
+                elseif isequal(length(args),1)
+                    try
+                        if isstruct(args.tasks)
+                           nrInArray = length(args.tasks);
+                        end
+                    catch
+                        error('"args" must either be a struct array or contain the field "tasks". In that case "tasks" needs to be a struct array and contain the field "subtasks".');
+                    end
+                elseif length(args)>1
+                    nrInArray = length(args);
+                end
+            elseif ischar(data) || ischar(args)
+                error('"data" and "args" cannot be strings but need to be real data');
+            else  %we really shouldn't end up here...
+                error('There is something wrong with either "data" or "args". Please look into what you submitted. "data" needs to be a struct (-array) or cell array and "needs to be a struct or struct array.');
+            end
+
+            %put data and args into the right format
+            if isrow(data)
+                % This is interpreted as a column.
+                data = data';
+            end
+            if isrow(args)
+                args = args';
+            end
+
+
+        %InputParser/Parameters:
+            p = inputParser;
+            p.StructExpand = true;
+            p.KeepUnmatched = true;
+
+            addParameter(p,'tasks',[]);                                  	%struct array with instructions what a specific task is supposed to do when executing fun
+            addParameter(p,'batchOptions',{});                            	%instructions that include information such as wall-time, and partition type
+            addParameter(p,'runOptions','');
+            addParameter(p,'debug',false);
+
+            %all parameters for how your 'fun' should be run on the workers that all tasks share 
+            %can now be found in p.Unmatched
+            parse(p,varargin{:});
+
+            %if tasks has not been provided then this function cannot run
+            if isempty(args(1).tasks)
+                error('You need to provide instructions for what each node/worker is supposed to do')
+            end
+
+        %create the jobGroup that is send to the cluster        
+            %create a unique jobName for the group of tasks that is run on the cluster
+            jobGroupName = cat(2,fun,'_',datestr(now,'yy.mm.dd_HH.MM.SS.FFF'));
+
+            jobGroupDir = strrep(fullfile(o.remoteStorage,jobGroupName),'\','/');
+            % Create a (unique) directory on the head node to store data and results.
+            if ~o.exist(jobGroupDir,'dir')
+                result = o.command(['mkdir ' jobGroupDir]); %#ok<NASGU>
+            end
+
+            %create a file with input arguments that get passed to the function
+            %that will run on the cluster
+                argsFile = [jobGroupName '_args.mat'];
+                % Save a local copy of the args
+                localArgsFile = fullfile(o.localStorage,argsFile);
+                remoteArgsFile = fullfile(o.remoteStorage,argsFile);
+                save(localArgsFile,'args','-v7.3'); % 7.3 needed to allow partial loading of the args in each worker.
+                % Copy the args file to the cluster
+                o.put(localArgsFile,jobGroupDir);
+
+         	%specify the file(s) that the function should run on and upload it to
+         	%the cluster
+                % Save a local copy of the input data
+                localDataFile = fullfile(o.localStorage,[jobGroupName '_data.mat']);
+                remoteDataFile = fullfile(o.remoteStorage,[jobGroupName '_data.mat']);
+                save(localDataFile,'data','-v7.3'); % 7.3 needed to allow partial loading of the data in each worker.
+                % Copy the data file to the cluster
+             	o.put(localDataFile,jobDir);
+
+            %run the arrayJob     
+         	[jobId,result] =   o.sbatch('jobName',jobGroupName,'uniqueID','','batchOptions',p.Results.batchOptions,'mfile','slurm.taskBatchRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir},'runOptions',p.Results.runOptions,'nrInArray',nrInArray,'debug',p.Results.debug);
+        end
+               
         
         function [jobId,result] = sbatch(o,varargin)
             % Interface to the sbatch command on the cluster.
@@ -703,9 +811,7 @@ classdef slurm < handle
             %
             % See also slurm/feval for an example function that uses
             % slurm/sbatch to submit jobs to the scheduler.
-            
-            
-            
+             
             p = inputParser;
             p.addParameter('jobName','job',@ischar);
             p.addParameter('batchOptions',{},@iscell);
@@ -822,6 +928,7 @@ classdef slurm < handle
                 end
             end
         end
+
         
         function result = cancel(o,varargin)
             % Cancel a slurm job by its Job ID
@@ -1168,7 +1275,7 @@ classdef slurm < handle
             end
         end
         
-        function fevalRun(jobID,taskNr,varargin) %#ok<INUSL>
+        function taskBatchRun(jobID,taskNr,varargin) %#ok<INUSL>
             % This function runs on the cluster in response to a call to slurm.feval on the client.
             % It is not meant to be called directly. See slurm.feval.
             %
@@ -1189,34 +1296,97 @@ classdef slurm < handle
             % information can be saved (e.g. /scratch)
             % 'jobDir' - directory on the head node where the results are
             % stored. (and later retrieved by slurm.retrieve)
-            %
+            % 'taskData'  - if an array Job has been submitted then each worker receives a separate slice of data (default)
+            %               use '
+            
+            
             p = inputParser;
             p.addParameter('dataFile','');
             p.addParameter('argsFile','');
             p.addParameter('mFile','');
             p.addParameter('nodeTempDir','');
-            p.addParameter('jobDir','')
+            p.addParameter('jobDir',''); 
             p.parse(varargin{:});
             
+            %preload data and args to pass (slices/subsets) to workers
             dataMatFile = matfile(p.Results.dataFile); % Matfile object for the data so that we can pass a slice
-            if ~isempty(p.Results.argsFile)  % args may have extra inputs for the user mfile
-                load(p.Results.argsFile);
-            else
-                args = {};
+            dataMatFileInfo = whos(dataMatFile,'data');
+            argsMatFile = matfile(p.Results.argsFile);
+            argsMatFileInfo = whos(argsMatFile);
+            
+            %determine what kind of input the dataFile and the argsFile
+            %are, so that we can select (subsets) that will be passed to
+            %the workers. Case 1 assumes that all data and instructions is
+            %independent from each other, up to case 4 which assumes that
+            %all data is shared but data, as well as args only need a small
+            %amount to be passed to each worker. The main purpose is to
+            %avoid uploading the same data multiple times in case there is overlap
+            %between the datasets that workers need
+            % case 1: data and args are both struct arrays of the same length
+            %       -> pass 1 slice of each to the worker, based on taskNr
+            % case 2: data is a struct and args is a struct array
+            %       -> pass the same data to each worker but a different args slice (based on taskNr)
+            % case 3: data is a cell array and args is a struct array
+            %       -> pass a subset of data, which will be selected based
+            %       on the 'tasks'-field of args(taskNr).tasks
+            % case 4: data is a cell array and args is a struct which
+            %         contains the field 'tasks', which is a struct array
+            %       -> pass a subset of data, and a subset of data in args of whatever has the same size as data.
+            %       Both subsets will be selected based on args.tasks(taskNr).subtasks
+            %       (this case is essentially the same as case
+            
+           % if (strcmpi(dataMatFileInfo.class,'struct') && strcmpi(argsMatFileInfo.class,'struct')) || (strcmpi(dataMatFileInfo.class,'cell') && isempty(args))
+                
+            if strcmpi(dataMatFileInfo.class,'struct')
+                if strcmpi(argsMatFileInfo.class,'struct')
+                    %case 1
+                    if isequal(prod(dataMatFileInfo.size),prod(argsMatFileInfo.size))
+                        data = dataMatFile.data(taskNr,:);
+                        args = argsMatFile.args(taskNr,:);
+                    %case 2
+                    elseif prod(argsMatFileInfo.size)>1
+                        data = dataMatFile.data;
+                        args = argsMatFile.args(taskNr,:);
+                    end
+                end
+            elseif strcmpi(dataMatFileInfo.class,'cell')
+             	%if data is provided as a cell array then the assumption is
+             	%that only particular cells should be passed to each worker.
+                %Which cells those are should be provided in either 
+                %args(taskNr).tasks or args.tasks(taskNr).subtasks
+                
+                %case 3
+                if strcmpi(argsMatFileInfo.class,'cell') && prod(argsMatFileInfo.size)>1
+                    args = argsMatFile.args(taskNr,:);
+                    %if data is provided as a cell array then the
+                    %assumption is that only particular cells should be
+                    %passed to each worker. args
+                    uDataIdx = unique(args.tasks);
+                    data = cell(dataMatFileInfo.size);
+                    for dataColCntr = 1:size(data,2)
+                        for uDataCntr = 1:numel(uDataIdx)
+                            data{uDataIdx(uDataCntr),dataColCntr} = cell2mat(dataMatFile.data(uDataIdx(uDataCntr),dataColCntr));
+                        end
+                    end
+                %case 4
+                elseif isequal(prod(argsMatFileInfo.size),1)
+                    fullArgsFile = argsMatFile.args;
+                    try
+                        argsTemp = rmfield(fullArgsFile,'tasks');                      
+                        subTasks = fullArgsFile.tasks(taskNr).subtasks;
+                        args = argsTemp;
+                        args.tasks = subTasks;
+                        %the assumption is that as well as for data
+                       
+                        args = fullArgsFile.tasks(taskNr);
+                        error('"args" does not contain the field "tasks". Take a look at at')
+
+                    end
+                end
             end
-            % Load a single element of the data cell array from the matfile and
-            % pass it to the mfile, together with all the args.
-            
-            data = dataMatFile.data(taskNr,:); % Read a row from the cell array
-            if isstruct(data)
-                data = {data};
-            elseif ~iscell(data) %- cannot happen.. numeric is converted to cell in
-                %feval and cell stays cell
-                error(['The data in ' p.Results.dataFile ' has the wrong type: ' class(data) ]);
-            end
-            
-            
-            result = feval(p.Results.mFile,data{:},args{:}); % Pass all cells of the row to the mfile as argument (plus optional args)
+                
+           
+            result = feval(p.Results.mFile,data,args); % Pass all cells of the row to the mfile as argument (plus optional args)
             
             % Save the result in the jobDir as 1.result.mat, 2.result.mat
             % etc.
