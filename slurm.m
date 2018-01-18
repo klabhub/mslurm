@@ -675,7 +675,7 @@ classdef slurm < handle
                     error('No input provided for "args". Either specify that variable or consider using either o.feval or o.sbatch instead of taskBatch to submit jobs.');
                 elseif isequal(length(args),1)
                     try
-                        if isstruct(args.tasks)
+                        if iscell(args.tasks)
                            nrInArray = length(args.tasks);
                         end
                     catch
@@ -721,8 +721,16 @@ classdef slurm < handle
 
         %create the jobGroup that is send to the cluster        
             %create a unique jobName for the group of tasks that is run on the cluster
-            jobGroupName = cat(2,fun,'_',datestr(now,'yy.mm.dd_HH.MM.SS.FFF'));
-
+            %but users are allowed to name the final output file, which
+            %will be reflected in the name of the jobGroup
+            if isfield(args,'outputName')
+                if ~isempty(args.outputName)
+                    jobGroupName = cat(2,fun,'_', args.outputName, '_', datestr(now,'yy.mm.dd_HH.MM.SS.FFF'));
+                end
+            else %in case that the user did not choose a particular name
+                jobGroupName = cat(2,fun,'_', datestr(now,'yy.mm.dd_HH.MM.SS.FFF'));
+            end
+            
             jobGroupDir = strrep(fullfile(o.remoteStorage,jobGroupName),'\','/');
             % Create a (unique) directory on the head node to store data and results.
             if ~o.exist(jobGroupDir,'dir')
@@ -737,7 +745,9 @@ classdef slurm < handle
                 remoteArgsFile = fullfile(o.remoteStorage,argsFile);
                 save(localArgsFile,'args','-v7.3'); % 7.3 needed to allow partial loading of the args in each worker.
                 % Copy the args file to the cluster
-                o.put(localArgsFile,jobGroupDir);
+                if ~p.Results.debug
+                    o.put(localArgsFile,jobGroupDir);
+                end
 
          	%specify the file(s) that the function should run on and upload it to
          	%the cluster
@@ -746,10 +756,50 @@ classdef slurm < handle
                 remoteDataFile = fullfile(o.remoteStorage,[jobGroupName '_data.mat']);
                 save(localDataFile,'data','-v7.3'); % 7.3 needed to allow partial loading of the data in each worker.
                 % Copy the data file to the cluster
-             	o.put(localDataFile,jobDir);
+                if ~p.Results.debug
+                    o.put(localDataFile,jobDir);
+                end
 
-            %run the arrayJob     
-         	[jobId,result] =   o.sbatch('jobName',jobGroupName,'uniqueID','','batchOptions',p.Results.batchOptions,'mfile','slurm.taskBatchRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir},'runOptions',p.Results.runOptions,'nrInArray',nrInArray,'debug',p.Results.debug);
+            %run all tasks as an arrayJob     
+         	jobId = o.sbatch('jobName',jobGroupName,'uniqueID','','batchOptions',p.Results.batchOptions,'mfile','slurm.taskBatchRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir},'runOptions',p.Results.runOptions,'nrInArray',nrInArray,'debug',p.Results.debug);
+            
+            
+      	%start a collate job
+            if ~isempty(jobID)  %jobs have been submitted succesfully
+                dependency = sprintf('afterany:%s',jobId);  %execute this after the arrayJob has been succesfully submitted
+                
+                %check if a collate function exists that is specific to 'fun'
+                %Option 1: a collate statement can be found in 'fun'
+                            %-> the user specified a parameter called 'action'
+                            %-> a switch statement exists to collate the results instead of performing an analysis
+                funFile = [fun '.m'];           %the filename of the function
+                funText = fileread(funFile);    %read the function as text
+
+                %Option 2: a unique collate function 'fun_collate' can be found
+                collateFun = [fun '_collate'];
+
+                %Option 3: no instructions on how the taskBatch-jobs should be
+                %collated. In that case, just create a struct-array
+                %result(1:nrInArray).data ...
+
+                if contains(funText,'action') &&  contains(funText,'case "collate"')
+                %option 1
+                    collateJobId  = cls.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir},'runOptions',runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug);
+
+                elseif isequal(exist(collateFun,'file'),2)
+                %option 2
+                    collateJobId  = cls.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',collateFun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir},'runOptions',runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug);
+
+                else        
+                %option 3
+                    collateJobId  = cls.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.defaultCollate','mfileExtraInput','mfileExtraInput',{'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir},'runOptions',runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug);
+
+                end
+            end
+           
+            jobId.taskIds = jobId;
+            jobId.collateJobId = collateJobId;
+
         end
                
         
@@ -1308,89 +1358,113 @@ classdef slurm < handle
             p.addParameter('jobDir',''); 
             p.parse(varargin{:});
             
-            %preload data and args to pass (slices/subsets) to workers
-            dataMatFile = matfile(p.Results.dataFile); % Matfile object for the data so that we can pass a slice
-            dataMatFileInfo = whos(dataMatFile,'data');
-            argsMatFile = matfile(p.Results.argsFile);
-            argsMatFileInfo = whos(argsMatFile);
+            %if this is a collate job, then the taskNr will be 0, otherwise
+            %it will be the taskNr out of the numbers 1:nrInArray
+            if taskNr > 0
             
-            %determine what kind of input the dataFile and the argsFile
-            %are, so that we can select (subsets) that will be passed to
-            %the workers. Case 1 assumes that all data and instructions is
-            %independent from each other, up to case 4 which assumes that
-            %all data is shared but data, as well as args only need a small
-            %amount to be passed to each worker. The main purpose is to
-            %avoid uploading the same data multiple times in case there is overlap
-            %between the datasets that workers need
-            % case 1: data and args are both struct arrays of the same length
-            %       -> pass 1 slice of each to the worker, based on taskNr
-            % case 2: data is a struct and args is a struct array
-            %       -> pass the same data to each worker but a different args slice (based on taskNr)
-            % case 3: data is a cell array and args is a struct array
-            %       -> pass a subset of data, which will be selected based
-            %       on the 'tasks'-field of args(taskNr).tasks
-            % case 4: data is a cell array and args is a struct which
-            %         contains the field 'tasks', which is a struct array
-            %       -> pass a subset of data, and a subset of data in args of whatever has the same size as data.
-            %       Both subsets will be selected based on args.tasks(taskNr).subtasks
-            %       (this case is essentially the same as case
-            
-           % if (strcmpi(dataMatFileInfo.class,'struct') && strcmpi(argsMatFileInfo.class,'struct')) || (strcmpi(dataMatFileInfo.class,'cell') && isempty(args))
-                
-            if strcmpi(dataMatFileInfo.class,'struct')
-                if strcmpi(argsMatFileInfo.class,'struct')
-                    %case 1
-                    if isequal(prod(dataMatFileInfo.size),prod(argsMatFileInfo.size))
-                        data = dataMatFile.data(taskNr,:);
-                        args = argsMatFile.args(taskNr,:);
-                    %case 2
-                    elseif prod(argsMatFileInfo.size)>1
-                        data = dataMatFile.data;
-                        args = argsMatFile.args(taskNr,:);
-                    end
-                end
-            elseif strcmpi(dataMatFileInfo.class,'cell')
-             	%if data is provided as a cell array then the assumption is
-             	%that only particular cells should be passed to each worker.
-                %Which cells those are should be provided in either 
-                %args(taskNr).tasks or args.tasks(taskNr).subtasks
-                
-                %case 3
-                if strcmpi(argsMatFileInfo.class,'cell') && prod(argsMatFileInfo.size)>1
-                    args = argsMatFile.args(taskNr,:);
-                    %if data is provided as a cell array then the
-                    %assumption is that only particular cells should be
-                    %passed to each worker. args
-                    uDataIdx = unique(args.tasks);
-                    data = cell(dataMatFileInfo.size);
-                    for dataColCntr = 1:size(data,2)
-                        for uDataCntr = 1:numel(uDataIdx)
-                            data{uDataIdx(uDataCntr),dataColCntr} = cell2mat(dataMatFile.data(uDataIdx(uDataCntr),dataColCntr));
+                %preload data and args to pass (slices/subsets) to workers
+                dataMatFile = matfile(p.Results.dataFile); % Matfile object for the data so that we can pass a slice
+                dataMatFileInfo = whos(dataMatFile,'data');
+                argsMatFile = matfile(p.Results.argsFile);
+                argsMatFileInfo = whos(argsMatFile,'args');
+
+                %determine what kind of input the dataFile and the argsFile
+                %are, so that we can select (subsets) that will be passed to
+                %the workers. Case 1 assumes that all data and instructions is
+                %independent from each other, up to case 4 which assumes that
+                %all data is shared but data, as well as args only need a small
+                %amount to be passed to each worker. The main purpose is to
+                %avoid uploading the same data multiple times in case there is overlap
+                %between the datasets that workers need
+                % case 1: data and args are both struct arrays of the same length
+                %       -> pass 1 slice of each to the worker, based on taskNr
+                % case 2: data is a struct and args is a struct array
+                %       -> pass the same data to each worker but a different args slice (based on taskNr)
+                % case 3: data is a cell array and args is a struct array
+                %       -> pass a subset of data, which will be selected based
+                %       on the 'tasks'-field of args(taskNr).tasks
+                % case 4: data is a cell array and args is a struct which
+                %         contains the field 'tasks', which is a struct array
+                %       -> pass a subset of data, and a subset of data in args of whatever has the same size as data.
+                %       Both subsets will be selected based on args.tasks(taskNr).subtasks
+                %       (this case is essentially the same as case
+
+               % if (strcmpi(dataMatFileInfo.class,'struct') && strcmpi(argsMatFileInfo.class,'struct')) || (strcmpi(dataMatFileInfo.class,'cell') && isempty(args))
+
+                if strcmpi(dataMatFileInfo.class,'struct')
+                    if strcmpi(argsMatFileInfo.class,'struct')
+                        %case 1
+                        if isequal(prod(dataMatFileInfo.size),prod(argsMatFileInfo.size))
+                            dataSlice.data = dataMatFile.data(taskNr,:);
+                            args = argsMatFile.args(taskNr,:);
+                        %case 2
+                        elseif prod(argsMatFileInfo.size)>1
+                            dataSlice.data = dataMatFile.data;
+                            args = argsMatFile.args(taskNr,:);
                         end
                     end
-                %case 4
-                elseif isequal(prod(argsMatFileInfo.size),1)
-                    fullArgsFile = argsMatFile.args;
-                    try
-                        argsTemp = rmfield(fullArgsFile,'tasks');                      
-                        subTasks = fullArgsFile.tasks(taskNr).subtasks;
-                        args = argsTemp;
-                        args.tasks = subTasks;
-                        %the assumption is that as well as for data
-                       
-                        args = fullArgsFile.tasks(taskNr);
-                        error('"args" does not contain the field "tasks". Take a look at at')
+                elseif strcmpi(dataMatFileInfo.class,'cell')
+                    %if data is provided as a cell array then the assumption is
+                    %that only particular cells should be passed to each worker.
+                    %Which cells those are should be provided in either 
+                    %args(taskNr).tasks or args.tasks(taskNr).subtasks
 
+                    %case 3
+                    if strcmpi(argsMatFileInfo.class,'struct') && prod(argsMatFileInfo.size)>1
+                        args = argsMatFile.args(taskNr,:);
+                        %if data is provided as a cell array then the
+                        %assumption is that only particular cells should be
+                        %passed to each worker. args
+                        uDataIdx = unique(args.tasks);
+                        dataSlice.data = cell(dataMatFileInfo.size);
+                        for dataColCntr = 1:size(dataSlice.data,2)
+                            for uDataCntr = 1:numel(uDataIdx)
+                                dataSlice.data{uDataIdx(uDataCntr),dataColCntr} = cell2mat(dataMatFile.data(uDataIdx(uDataCntr),dataColCntr));
+                            end
+                        end
+                    %case 4
+                    elseif isequal(prod(argsMatFileInfo.size),1)
+                        fullArgsFile = argsMatFile.args;
+                            argsTemp = rmfield(fullArgsFile,'tasks');                      
+                            subTasks = fullArgsFile.tasks{taskNr};
+                            args = argsTemp;
+                            args.tasks = subTasks;
+
+                        uDataIdx = unique(args.tasks);
+                        dataSlice.data = cell(dataMatFileInfo.size);
+                        for dataColCntr = 1:size(dataSlice.data,2)
+                            for uDataCntr = 1:numel(uDataIdx)
+                                dataSlice.data{uDataIdx(uDataCntr),dataColCntr} = cell2mat(dataMatFile.data(uDataIdx(uDataCntr),dataColCntr));
+                            end
+                        end
+                        %now get rid of all cells in args that are not needed
+                        argsFieldNames = fieldnames(args);
+                        for fieldNameCntr = 1:length(argsFieldNames)
+                            if isequal(size(args.(argsFieldNames{fieldNameCntr})),size(dataSlice.data))
+                                args.(argsFieldNames{fieldNameCntr}) = cell(dataMatFileInfo.size);
+                                for colCntr = 1:size(dataSlice.data,2)
+                                    useIdx =  find(~cellfun(@isempty,dataSlice.data(:,2)));
+                                    args.(argsFieldNames{fieldNameCntr})(useIdx,colCntr) = fullArgsFile.(argsFieldNames{fieldNameCntr})(useIdx,colCntr);
+                                end
+                            end
+                        end
                     end
                 end
-            end
+
+
+                result = feval(p.Results.mFile,dataSlice,args); % Pass all cells of the row to the mfile as argument (plus optional args)
+
+                % Save the result in the jobDir as 1.result.mat, 2.result.mat
+                % etc.
+                slurm.saveResult([num2str(taskNr) '.result.mat'] ,result,p.Results.nodeTempDir,p.Results.jobDir);
                 
-           
-            result = feval(p.Results.mFile,data,args); % Pass all cells of the row to the mfile as argument (plus optional args)
-            
-            % Save the result in the jobDir as 1.result.mat, 2.result.mat
-            % etc.
-            slurm.saveResult([num2str(taskNr) '.result.mat'] ,result,p.Results.nodeTempDir,p.Results.jobDir);
+            else %this means taskNr is 0 and we should collate instead
+                dataSlice = []; %no data needed except for those that the function will load itself from jobDir
+                args.action = 'collate';
+                args.jobDir = p.Results.jobDir; %where can results from tasks be found and should the collated result be saved
+                result = feval(p.Results.mFile,dataSlice,args); % Pass all cells of the row to the mfile as argument (plus optional args)
+              	slurm.saveResult([num2str(taskNr) '.result.mat'] ,result,p.Results.nodeTempDir,p.Results.jobDir);
+            end
         end
         
         
