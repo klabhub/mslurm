@@ -1325,9 +1325,67 @@ classdef slurm < handle
             end
         end
         
-        function taskBatchRun(jobID,taskNr,varargin) %#ok<INUSL>
+        
+        function fevalRun(jobID,taskNr,varargin) %#ok<INUSL>
             % This function runs on the cluster in response to a call to slurm.feval on the client.
             % It is not meant to be called directly. See slurm.feval.
+            %
+            % It will run a specified mfile on an element of the specified data array
+            % INPUT:
+            % jobID = slurm job id
+            % taskNr = The number of this job in the array of jobs. This
+            % number is used to pick one item from the data array.
+            %
+            % Other properties are specified as parm/value pairs
+            %
+            % 'mfile'  - The Mfile that will be run,.
+            % 'datafile'  - File containing the that will be passed to
+            % mfile.
+            % 'argsFile'  - File containing the extra input arguments for
+            % the mfile
+            % 'nodeTempDir' - folder on the nodes where temporary
+            % information can be saved (e.g. /scratch)
+            % 'jobDir' - directory on the head node where the results are
+            % stored. (and later retrieved by slurm.retrieve)
+            %
+            p = inputParser;
+            p.addParameter('dataFile','');
+            p.addParameter('argsFile','');
+            p.addParameter('mFile','');
+            p.addParameter('nodeTempDir','');
+            p.addParameter('jobDir','')
+            p.parse(varargin{:});
+            
+            dataMatFile = matfile(p.Results.dataFile); % Matfile object for the data so that we can pass a slice
+            if ~isempty(p.Results.argsFile)  % args may have extra inputs for the user mfile
+                load(p.Results.argsFile);
+            else
+                args = {};
+            end
+            % Load a single element of the data cell array from the matfile and
+            % pass it to the mfile, together with all the args.
+            
+            data = dataMatFile.data(taskNr,:); % Read a row from the cell array
+            if isstruct(data)
+                data = {data};
+            elseif ~iscell(data) %- cannot happen.. numeric is converted to cell in
+                %feval and cell stays cell
+                error(['The data in ' p.Results.dataFile ' has the wrong type: ' class(data) ]);
+            end
+            
+            
+            result = feval(p.Results.mFile,data{:},args{:}); % Pass all cells of the row to the mfile as argument (plus optional args)
+            
+            % Save the result in the jobDir as 1.result.mat, 2.result.mat
+            % etc.
+            slurm.saveResult([num2str(taskNr) '.result.mat'] ,result,p.Results.nodeTempDir,p.Results.jobDir);
+        end
+        
+        
+        function taskBatchRun(jobID,taskNr,varargin) %#ok<INUSL>
+            % This function is a modified version of fevalRun and runs on the cluster in response to 
+            % a call to slurm.taskBatch on the client.
+            % It is not meant to be called directly. See slurm.taskBatch.
             %
             % It will run a specified mfile on an element of the specified data array
             % INPUT:
