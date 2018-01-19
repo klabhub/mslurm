@@ -576,7 +576,7 @@ classdef slurm < handle
             if ~ischar(fun)
                 error('The fun argument must be the name of an m-file');
             end
-            if ~(iscell(data) || isnumeric(data) || isstruct(data))
+            if ~(iscell(data) || isnumeric(data) || isstruct(data)) || ischar(data))
                 error('Data must be numeric, cell, or struct');
             end
             
@@ -617,7 +617,6 @@ classdef slurm < handle
             p.addParameter('runOptions','');
             p.addParameter('debug',false);
             p.addParameter('copy',false);
-            p.addParameter('deleteLocal',false,@islogical);
             p.KeepUnmatched = true;
             p.parse(varargin{:});
             
@@ -643,11 +642,6 @@ classdef slurm < handle
             %% Start the jobs
             o.sbatch('jobName',jobName,'uniqueID','auto','batchOptions',p.Results.batchOptions,'mfile','slurm.fevalRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobDir},'debug',p.Results.debug,'runOptions',p.Results.runOptions,'nrInArray',nrDataJobs,'taskNr',1);
             
-            %delete local copy right away instead of after succesful
-            %completion of the job
-           	if p.Results.deleteLocal
-                delete(localDataFile);
-            end
         end
         
         
