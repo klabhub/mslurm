@@ -684,6 +684,12 @@ classdef slurm < handle
                 error('There is something wrong with either "data" or "args". Please look into what you submitted. "data" needs to be a struct (-array) or cell array and "needs to be a struct or struct array.');
             end
 
+            %later we need to check if all results have been added
+            %correctly, so we add to the argsFile how many tasks we
+            %generated (nrInArray)
+            args(1).totalNrTasks = nrInArray;
+            
+            
             %put data and args into the right format
             if isrow(data)
                 % This is interpreted as a column.
@@ -702,15 +708,15 @@ classdef slurm < handle
             addParameter(p,'tasks',[]);                                  	%struct array with instructions what a specific task is supposed to do when executing fun
             addParameter(p,'batchOptions',{});                            	%instructions that include information such as wall-time, and partition type
             addParameter(p,'runOptions','');
+          	addParameter(p,'uniqueOutputName',true);                  	%will the final collated filename reflect the uniqueID that is automatically generated?
+                                                                            %true [default]: the same analysis can be performed multiple times and none will be overwritten
+                                                                            %false: the next time that
             addParameter(p,'debug',false);
-
-            %all parameters for how your 'fun' should be run on the workers that all tasks share 
-            %can now be found in p.Unmatched
             parse(p,varargin{:});
 
             %if tasks has not been provided then this function cannot run
             if isempty(args(1).tasks)
-                error('You need to provide instructions for what each node/worker is supposed to do')
+                error('The input arguments do not have a field "tasks". Use that field to provide instructions for what each node/worker is supposed to do')
             end
 
         %create the jobGroup that is send to the cluster        
@@ -719,17 +725,35 @@ classdef slurm < handle
             %will be reflected in the name of the jobGroup
             if isfield(args,'outputName')
                 if ~isempty(args.outputName)
-                    jobGroupName = cat(2,fun,'_', args.outputName, '_', datestr(now,'yy.mm.dd_HH.MM.SS.FFF'));
+                    jobGroupName = cat(2,fun,'_', args.outputName, '_', datestr(now,'yymmdd_HHMMSS'));
+                    if p.Results.uniqueOutputName
+                        finalFolderName =  ['sibdo/' getenv('USERNAME') '/' args.outputName '_' fun '_', datestr(now,'yymmdd_HHMMSS')]; % Where results end up;
+                    else
+                        finalFolderName =  ['sibdo/' getenv('USERNAME') '/' args.outputName '_' fun];
+                    end
                 end
             else %in case that the user did not choose a particular name
-                jobGroupName = cat(2,fun,'_', datestr(now,'yy.mm.dd_HH.MM.SS.FFF'));
+                jobGroupName = cat(2,fun,'_', datestr(now,'yymmdd_HHMMSS'));
+                finalFolderName =  ['sibdo/' getenv('USERNAME') '/' fun '_' datestr(now,'yymmdd_HHMMSS')];
+                if ~p.Results.uniqueOutputName
+                    warning('If no outputName is specified in args.outputName, then keepUniqueOutputName will be set to true')
+                end
             end
             
-            jobGroupDir = strrep(fullfile(o.remoteStorage,jobGroupName),'\','/');
-            % Create a (unique) directory on the head node to store data and results.
-            if ~o.exist(jobGroupDir,'dir')
-                result = o.command(['mkdir ' jobGroupDir]); %#ok<NASGU>
-            end
+            %create directories on the cluster where temporary and final results can be stored
+                %1. a folder in the user's sibdo folder where the collated
+                %result will be saved for good
+                finalFolderDir = strrep(fullfile(o.headRootDir,finalFolderName),'\','/');
+                if ~o.exist(finalFolderDir,'dir')
+                    result = o.command(['mkdir ' finalFolderDir]); %#ok<NASGU>
+                end
+
+                %2. a folder in the remoteStorage to save the task results from each worker,
+                jobGroupDir = strrep(fullfile(o.remoteStorage,jobGroupName),'\','/');           
+                if ~o.exist(jobGroupDir,'dir')
+                    result = o.command(['mkdir ' jobGroupDir]); %#ok<NASGU>
+                end
+                
 
             %create a file with input arguments that get passed to the function
             %that will run on the cluster
@@ -743,15 +767,14 @@ classdef slurm < handle
                     o.put(localArgsFile,jobGroupDir);
                 end
 
-         	%specify the file(s) that the function should run on and upload it to
-         	%the cluster
+         	%specify the file(s) that the function should run on and upload it to the cluster
                 % Save a local copy of the input data
                 localDataFile = fullfile(o.localStorage,[jobGroupName '_data.mat']);
                 remoteDataFile = fullfile(o.remoteStorage,[jobGroupName '_data.mat']);
                 save(localDataFile,'data','-v7.3'); % 7.3 needed to allow partial loading of the data in each worker.
                 % Copy the data file to the cluster
                 if ~p.Results.debug
-                    o.put(localDataFile,jobDir);
+                    o.put(localDataFile,jobGroupDir);
                 end
 
             %run all tasks as an arrayJob     
@@ -770,7 +793,7 @@ classdef slurm < handle
                 funText = fileread(funFile);    %read the function as text
 
                 %Option 2: a unique collate function 'fun_collate' can be found
-                collateFun = [fun '_collate'];
+                separateCollateFun = [fun '_collate'];
 
                 %Option 3: no instructions on how the taskBatch-jobs should be
                 %collated. In that case, just create a struct-array
@@ -778,17 +801,16 @@ classdef slurm < handle
 
                 if contains(funText,'action') &&  contains(funText,'case "collate"')
                 %option 1
-                    collateJobId  = cls.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir},'runOptions',runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug);
-
-                elseif isequal(exist(collateFun,'file'),2)
+                    collateFun = fun;
+                elseif isequal(exist(separateCollateFun,'file'),2)
                 %option 2
-                    collateJobId  = cls.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',collateFun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir},'runOptions',runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug);
-
-                else        
-                %option 3
-                    collateJobId  = cls.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.defaultCollate','mfileExtraInput','mfileExtraInput',{'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir},'runOptions',runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug);
-
+                 	collateFun = separateCollateFun;
+                else
+             	%option 3
+                    collateFun = 'slurm.taskBatchCollate';
                 end
+                %run the collateJob (via sbatch, which will run taskBatchRun)
+             	collateJobId  = cls.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',collateFun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir},'runOptions',runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug); 
             end
            
             jobId.taskIds = jobId;
@@ -1409,17 +1431,20 @@ classdef slurm < handle
             p.addParameter('nodeTempDir','');
             p.addParameter('jobDir',''); 
             p.parse(varargin{:});
-            
-            %if this is a collate job, then the taskNr will be 0, otherwise
-            %it will be the taskNr out of the numbers 1:nrInArray
-            if taskNr > 0
-            
-                %preload data and args to pass (slices/subsets) to workers
+
+           	%preload data and args to pass (slices/subsets) to workers
                 dataMatFile = matfile(p.Results.dataFile); % Matfile object for the data so that we can pass a slice
                 dataMatFileInfo = whos(dataMatFile,'data');
                 argsMatFile = matfile(p.Results.argsFile);
                 argsMatFileInfo = whos(argsMatFile,'args');
-
+            
+                userSibdoDir = argsMatFile.args(1).userSibdoDir;
+                
+                
+            %if this is a collate job, then the taskNr will be 0, otherwise
+            %it will be the taskNr out of the numbers 1:nrInArray
+            if taskNr > 0
+            
                 %determine what kind of input the dataFile and the argsFile
                 %are, so that we can select (subsets) that will be passed to
                 %the workers. Case 1 assumes that all data and instructions is
@@ -1439,9 +1464,7 @@ classdef slurm < handle
                 %         contains the field 'tasks', which is a struct array
                 %       -> pass a subset of data, and a subset of data in args of whatever has the same size as data.
                 %       Both subsets will be selected based on args.tasks(taskNr).subtasks
-                %       (this case is essentially the same as case
-
-               % if (strcmpi(dataMatFileInfo.class,'struct') && strcmpi(argsMatFileInfo.class,'struct')) || (strcmpi(dataMatFileInfo.class,'cell') && isempty(args))
+                %       (this case is essentially the same as case 3)
 
                 if strcmpi(dataMatFileInfo.class,'struct')
                     if strcmpi(argsMatFileInfo.class,'struct')
@@ -1503,23 +1526,55 @@ classdef slurm < handle
                     end
                 end
 
+                %remove information that we jsut put into the user's
+                %arguments for convenience but have nothing to do with the
+                %user's actual function
+                    args = rmfield(args,'userSibdoDir');
 
                 result = feval(p.Results.mFile,dataSlice,args); % Pass all cells of the row to the mfile as argument (plus optional args)
 
                 % Save the result in the jobDir as 1.result.mat, 2.result.mat
                 % etc.
-                slurm.saveResult([num2str(taskNr) '.result.mat'] ,result,p.Results.nodeTempDir,p.Results.jobDir);
+                slurm.saveResult([num2str(taskNr) '.result.mat'],result,p.Results.nodeTempDir,p.Results.jobDir);
                 
             else %this means taskNr is 0 and we should collate instead
                 dataSlice = []; %no data needed except for those that the function will load itself from jobDir
-                args.action = 'collate';
-                args.jobDir = p.Results.jobDir; %where can results from tasks be found and should the collated result be saved
+                args = argsMatFile.args;    %get full argsFile, instead of just a slice so that the user can use that information for collating the results
+                args(1).action = 'collate';
+                args(1).jobDir = p.Results.jobDir; %where can results from tasks be found and should the collated result be saved
                 result = feval(p.Results.mFile,dataSlice,args); % Pass all cells of the row to the mfile as argument (plus optional args)
-              	slurm.saveResult([num2str(taskNr) '.result.mat'] ,result,p.Results.nodeTempDir,p.Results.jobDir);
+                
+                %transfer the collated result tot he user's sibdo folder
+              	slurm.saveResult('collatedResult.mat',result,p.Results.nodeTempDir,userSibdoDir);                
             end
         end
         
-        
+        function result = taskBatchCollate(inputData,args)
+            %a simple function that grabs the results from each worker from the
+            %subfolder .../tempResults and combines them into a single struct 
+            
+            if ~isempty(inputData)
+                result.warning=  warning('for some reason there was also some inputData provided to "taskBatchCollate". This is not a problem but it is unexpected');
+            end
+            
+            taskDir = args(1).jobDir;
+            
+         	resultFileNames = dir(taskDir);
+            resultFileNames = {resultFileNames.name};
+            match = contains(resultFileNames,'.results.mat');
+            resultFileNames = resultFileNames(match);
+
+            fileNrEndIdx = cell2mat(strfind(resultFileNames,'.results.mat'));
+
+            fileIdx = nan(1,length(resultFileNames));
+            result(args(1).totalNrTasks).result = [];
+            
+            for fileCntr = 1:length(resultFileNames)
+                fileIdx(fileCntr) = str2double(resultFileNames{fileCntr}(1:fileNrEndIdx(fileCntr)-1));
+                result(fileIdx(fileCntr)) = load([testDir '\' num2str(fileIdx(fileCntr)) '.results.mat']);
+            end
+                                  
+        end
         
         function fileInFileOutRun(jobID,taskNr,varargin) %#ok<INUSL>
             % This function runs on the cluster in response to a call to slurm.fileInFileOut on the client.
