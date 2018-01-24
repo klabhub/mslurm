@@ -127,6 +127,7 @@ if handles.slurm.nrJobs >0
     nrGroups =numel(handles.current.groups);
     groupString = cell(1,nrGroups);
     for group=1:nrGroups
+        try
         jobsInGroup = [handles.current.jobsPerGroup{group}];        
         failState = handles.current.failState(jobsInGroup);
         failStateColor = nan(size(failState));
@@ -138,6 +139,9 @@ if handles.slurm.nrJobs >0
         handles.current.failStateColor{group} = failStateColor;
         handles.current.groupFailState(group) = max(failStateColor);        
         groupString{group} = sprintf('<HTML><font color=''%s''>%s</font></HTML>',handles.parms.colors{handles.current.groupFailState(group)},handles.current.groups{group});
+        catch
+            groupString{group} = 'ungroupable';
+        end
     end
     
     
