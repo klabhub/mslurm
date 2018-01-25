@@ -704,11 +704,9 @@ classdef slurm < handle
             p = inputParser;
             p.StructExpand = true;
             p.KeepUnmatched = true;
-
-            addParameter(p,'tasks',[]);                                  	%struct array with instructions what a specific task is supposed to do when executing fun
             addParameter(p,'batchOptions',{});                            	%instructions that include information such as wall-time, and partition type
             addParameter(p,'runOptions','');
-          	addParameter(p,'uniqueOutputName',true);                  	%will the final collated filename reflect the uniqueID that is automatically generated?
+          	addParameter(p,'uniqueOutputName',true);                        %will the final collated filename reflect the uniqueID that is automatically generated?
                                                                             %true [default]: the same analysis can be performed multiple times and none will be overwritten
                                                                             %false: the next time that
             addParameter(p,'debug',false);
@@ -723,18 +721,20 @@ classdef slurm < handle
             %create a unique jobName for the group of tasks that is run on the cluster
             %but users are allowed to name the final output file, which
             %will be reflected in the name of the jobGroup
+            uid = datestr(now,'yymmdd_HHMMSS');
+            
             if isfield(args,'outputName')
-                if ~isempty(args.outputName)
-                    jobGroupName = cat(2,fun,'_', args.outputName, '_', datestr(now,'yymmdd_HHMMSS'));
+                if ~isempty(args(1).outputName)
+                    jobGroupName = cat(2,fun,'_', args(1).outputName, '_', uid);
                     if p.Results.uniqueOutputName
-                        finalFolderName =  ['sibdo/' getenv('USERNAME') '/' args.outputName '_' fun '_', datestr(now,'yymmdd_HHMMSS')]; % Where results end up;
+                        finalFolderName =  ['sibdo/' getenv('USERNAME') '/' args.outputName '_' fun '_', uid]; % Where results end up;
                     else
                         finalFolderName =  ['sibdo/' getenv('USERNAME') '/' args.outputName '_' fun];
                     end
                 end
             else %in case that the user did not choose a particular name
-                jobGroupName = cat(2,fun,'_', datestr(now,'yymmdd_HHMMSS'));
-                finalFolderName =  ['sibdo/' getenv('USERNAME') '/' fun '_' datestr(now,'yymmdd_HHMMSS')];
+                jobGroupName = cat(2,fun,'_', uid);
+                finalFolderName =  ['sibdo/' getenv('USERNAME') '/' fun '_' uid];
                 if ~p.Results.uniqueOutputName
                     warning('If no outputName is specified in args.outputName, then keepUniqueOutputName will be set to true')
                 end
@@ -743,16 +743,24 @@ classdef slurm < handle
             %create directories on the cluster where temporary and final results can be stored
                 %1. a folder in the user's sibdo folder where the collated
                 %result will be saved for good
-                finalFolderDir = strrep(fullfile(o.headRootDir,finalFolderName),'\','/');
-                if ~o.exist(finalFolderDir,'dir')
-                    result = o.command(['mkdir ' finalFolderDir]); %#ok<NASGU>
-                end
+                    %1.1 check if the users's sibdo folder exists and create
+                    %that folder if it doesnt
+                        userFolderDir = strrep(fullfile(o.headRootDir,['sibdo/' getenv('USERNAME')]),'\','/');
+                        args(1).userSibdoDir = userFolderDir;
+                        if ~o.exist(userFolderDir,'dir')
+                            result = o.command(['mkdir ' userFolderDir]); %#ok<NASGU>
+                        end
+                    %1.2 create the folder for the collated result within the user's sibdo folder    
+                        finalFolderDir = strrep(fullfile(o.headRootDir,finalFolderName),'\','/');
+                        if ~o.exist(finalFolderDir,'dir')
+                            result = o.command(['mkdir ' finalFolderDir]); %#ok<NASGU>
+                        end
 
-                %2. a folder in the remoteStorage to save the task results from each worker,
-                jobGroupDir = strrep(fullfile(o.remoteStorage,jobGroupName),'\','/');           
-                if ~o.exist(jobGroupDir,'dir')
-                    result = o.command(['mkdir ' jobGroupDir]); %#ok<NASGU>
-                end
+                %2. create a folder in the remoteStorage to save the task results from each worker,
+                    jobGroupDir = strrep(fullfile(o.remoteStorage,jobGroupName),'\','/');           
+                    if ~o.exist(jobGroupDir,'dir')
+                        result = o.command(['mkdir ' jobGroupDir]); %#ok<NASGU>
+                    end
                 
 
             %create a file with input arguments that get passed to the function
@@ -760,7 +768,7 @@ classdef slurm < handle
                 argsFile = [jobGroupName '_args.mat'];
                 % Save a local copy of the args
                 localArgsFile = fullfile(o.localStorage,argsFile);
-                remoteArgsFile = fullfile(o.remoteStorage,argsFile);
+                remoteArgsFile = strrep(fullfile(o.remoteStorage,jobGroupName,argsFile),'\','/');
                 save(localArgsFile,'args','-v7.3'); % 7.3 needed to allow partial loading of the args in each worker.
                 % Copy the args file to the cluster
                 if ~p.Results.debug
@@ -770,15 +778,16 @@ classdef slurm < handle
          	%specify the file(s) that the function should run on and upload it to the cluster
                 % Save a local copy of the input data
                 localDataFile = fullfile(o.localStorage,[jobGroupName '_data.mat']);
-                remoteDataFile = fullfile(o.remoteStorage,[jobGroupName '_data.mat']);
+                remoteDataFile = strrep(fullfile(o.remoteStorage,jobGroupName,[jobGroupName '_data.mat']),'\','/');
                 save(localDataFile,'data','-v7.3'); % 7.3 needed to allow partial loading of the data in each worker.
                 % Copy the data file to the cluster
                 if ~p.Results.debug
+                    warning('transferring dataset')
                     o.put(localDataFile,jobGroupDir);
                 end
 
             %run all tasks as an arrayJob     
-         	jobId = o.sbatch('jobName',jobGroupName,'uniqueID','','batchOptions',p.Results.batchOptions,'mfile','slurm.taskBatchRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir},'runOptions',p.Results.runOptions,'nrInArray',nrInArray,'debug',p.Results.debug);
+         	jobId = o.sbatch('jobName',[jobGroupName '-taskBatch'] ,'uniqueID','','batchOptions',p.Results.batchOptions,'mfile','slurm.taskBatchRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir},'runOptions',p.Results.runOptions,'nrInArray',nrInArray,'debug',p.Results.debug);
             
             
       	%start a collate job
@@ -1438,7 +1447,11 @@ classdef slurm < handle
                 argsMatFile = matfile(p.Results.argsFile);
                 argsMatFileInfo = whos(argsMatFile,'args');
             
-                userSibdoDir = argsMatFile.args(1).userSibdoDir;
+                if prod(argsMatFileInfo.size)>1
+                    userSibdoDir = argsMatFile.args(1,1).userSibdoDir;
+                else
+                    userSibdoDir = argsMatFile.args.userSibdoDir;
+                end
                 
                 
             %if this is a collate job, then the taskNr will be 0, otherwise
