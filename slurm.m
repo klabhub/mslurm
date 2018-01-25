@@ -791,8 +791,8 @@ classdef slurm < handle
             
             
       	%start a collate job
-            if ~isempty(jobID)  %jobs have been submitted succesfully
-                dependency = sprintf('afterany:%s',jobId);  %execute this after the arrayJob has been succesfully submitted
+            if ~isempty(jobId)  %jobs have been submitted succesfully
+                dependency = sprintf('afterany:%s',num2str(jobId));  %execute this after the arrayJob has been succesfully submitted
                 
                 %check if a collate function exists that is specific to 'fun'
                 %Option 1: a collate statement can be found in 'fun'
@@ -819,7 +819,7 @@ classdef slurm < handle
                     collateFun = 'slurm.taskBatchCollate';
                 end
                 %run the collateJob (via sbatch, which will run taskBatchRun)
-             	collateJobId  = cls.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',collateFun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir},'runOptions',runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug); 
+             	collateJobId  = cls.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',collateFun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir},'runOptions',p.Results.runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug); 
             end
            
             jobId.taskIds = jobId;
@@ -1450,7 +1450,8 @@ classdef slurm < handle
                 if prod(argsMatFileInfo.size)>1
                     userSibdoDir = argsMatFile.args(1,1).userSibdoDir;
                 else
-                    userSibdoDir = argsMatFile.args.userSibdoDir;
+                    userSibdoDir = argsMatFile.args;
+                    userSibdoDir = userSibdoDir.userSibdoDir;
                 end
                 
                 
