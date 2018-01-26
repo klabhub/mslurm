@@ -1554,7 +1554,7 @@ classdef slurm < handle
                 slurm.saveResult([num2str(taskNr) '.result.mat'],result,p.Results.nodeTempDir,p.Results.jobDir);
                 
             else %this means taskNr is 0 and we should collate instead
-             	result = slurm.taskBatchCollate(p.Results.jobDir,'mFile',p.Results.mFile,'action',p.Results.collateAction,'totalNrTasks',totalNrTasks); % Pass all cells of the row to the mfile as argument (plus optional args)
+             	result = slurm.taskBatchCollate(p.Results.jobDir,'mFile',p.Results.mFile,'action',p.Results.collateAction,'totalNrTasks',p.Results.totalNrTasks); % Pass all cells of the row to the mfile as argument (plus optional args)
                 
                 %transfer the collated result tot he user's sibdo folder
               	slurm.saveResult('collated.mat',result,p.Results.nodeTempDir,p.Results.userSibdoDir);                
