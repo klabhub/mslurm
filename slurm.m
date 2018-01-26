@@ -1594,7 +1594,7 @@ classdef slurm < handle
             end
             
             %decide how tasks should be collated
-            switch p.Results.collateType
+            switch p.Results.collateAction
                 case 'default'	%the user didn't specify, so the result will be a struct array (result(1:nrInArray).result....)
                     result = tempResult;
                 case 'specialCollateFile'   %the user made a special mFile that should be called to collate the results
