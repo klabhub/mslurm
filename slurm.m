@@ -1554,7 +1554,7 @@ classdef slurm < handle
                 slurm.saveResult([num2str(taskNr) '.result.mat'],result,p.Results.nodeTempDir,p.Results.jobDir);
                 
             else %this means taskNr is 0 and we should collate instead
-             	result = slurm.taskBatchCollate(p.Results.jobDir,'mFile',p.Results.mFile,'action',p.Results.collateAction,'totalNrTasks',p.Results.totalNrTasks); % Pass all cells of the row to the mfile as argument (plus optional args)
+             	result = slurm.taskBatchCollate(p.Results.jobDir,'mFile',p.Results.mFile,'collateAction',p.Results.collateAction,'totalNrTasks',p.Results.totalNrTasks); % Pass all cells of the row to the mfile as argument (plus optional args)
                 
                 %transfer the collated result tot he user's sibdo folder
               	slurm.saveResult('collated.mat',result,p.Results.nodeTempDir,p.Results.userSibdoDir);                
@@ -1569,13 +1569,13 @@ classdef slurm < handle
         %or by using a function that the user specifically made to collate those results,
         %or by specifying the parameter field 'action' with the input 'collate', in 'taskBatch('fun',...)'
   
-            defaultCollateType = 'default';
-            collateTypeOptions = {'default'; 'specialCollateFile'; 'containsCollate'};
+            defaultCollateAction = 'default';
+            collateActionOptions = {'default'; 'specialCollateFile'; 'containsCollate'};
             
           	p = inputParser;
                 addParameter(p,'mFile','');
                 addParameter(p,'totalNrTasks',1,@isnumeric);
-                addParameter(p,'collateType',defaultCollateType,@(x) any(validatestring(upper(x),collateTypeOptions)));
+                addParameter(p,'collateAction',defaultCollateAction,@(x) any(validatestring(upper(x),collateActionOptions)));
             parse(p,varargin{:});
             
          	resultFileNames = dir(jobDir);
