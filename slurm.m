@@ -816,7 +816,7 @@ classdef slurm < handle
                  	collateAction = 'default';
                 end
                 %run the collateJob (via sbatch, which will run taskBatchRun)
-             	collateJobId  = o.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',collateFun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',userFolderDir,'collateAction',collateAction,'totalNrTasks',nrInArray},'runOptions',p.Results.runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug); 
+             	collateJobId  = o.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',collateFun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',finalFolderDir,'collateAction',collateAction,'totalNrTasks',nrInArray},'runOptions',p.Results.runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug); 
             end
            
             jobId.taskIds = jobID;
@@ -1477,9 +1477,9 @@ classdef slurm < handle
                 %       -> pass a subset of data, which will be selected based
                 %       on the 'tasks'-field of args(taskNr).tasks
                 % case 4: data is a cell array and args is a struct which
-                %         contains the field 'tasks', which is a struct array
+                %         contains the field 'tasks', which is a cell array
                 %       -> pass a subset of data, and a subset of data in args of whatever has the same size as data.
-                %       Both subsets will be selected based on args.tasks(taskNr).subtasks
+                %       Both subsets will be selected based on args.tasks{taskNr}
                 %       (this case is essentially the same as case 3)
 
                 if strcmpi(dataMatFileInfo.class,'struct')
@@ -1547,8 +1547,8 @@ classdef slurm < handle
                 %handle
                     args = rmfield(args,'outputName');
                 	%args = rmfield(args,'totalNrTasks');
-
-                result = feval(p.Results.mFile,dataSlice,args); % Pass all cells of the row to the mfile as argument (plus optional args)
+                    
+                result = feval(p.Results.mFile,dataSlice.data,args); % Pass all cells of the row to the mfile as argument (plus optional args)
 
                 % Save the result in the jobDir as 1.result.mat, 2.result.mat, etc.
                 slurm.saveResult([num2str(taskNr) '.result.mat'],result,p.Results.nodeTempDir,p.Results.jobDir);
