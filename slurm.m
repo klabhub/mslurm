@@ -1583,14 +1583,14 @@ classdef slurm < handle
             match = contains(resultFileNames,'.result.mat');
             resultFileNames = resultFileNames(match);
 
-            fileNrEndIdx = cell2mat(strfind(resultFileNames,'.results.mat'));
+            fileNrEndIdx = cell2mat(strfind(resultFileNames,'.result.mat'));
 
             fileIdx = nan(1,length(resultFileNames));
             tempResult(p.Results.totalNrTasks).result = [];
             
             for fileCntr = 1:length(resultFileNames)
                 fileIdx(fileCntr) = str2double(resultFileNames{fileCntr}(1:fileNrEndIdx(fileCntr)-1));
-                tempResult(fileIdx(fileCntr)) = load([testDir '\' num2str(fileIdx(fileCntr)) '.results.mat']);
+                tempResult(fileIdx(fileCntr)) = load([jobDir '/' num2str(fileIdx(fileCntr)) '.result.mat']);
             end
             
             %decide how tasks should be collated
