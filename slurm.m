@@ -1592,7 +1592,7 @@ classdef slurm < handle
                 tempResult(fileIdx(fileCntr)) = load([jobDir '/' num2str(fileIdx(fileCntr)) '.result.mat']);
                 %simplify the output to just 'result(1:nrInArray).fieldnames
                 %instead of result(1:nrInArray).result.fieldnames
-                fieldNames = fieldname(tempResult(fileIdx(fileCntr)).result);
+                fieldNames = fieldnames(tempResult(fileIdx(fileCntr)).result);
                 for fieldNameCntr = 1:length(fieldNames)
                     preResult(fileIdx(fileCntr)).(fieldNames{fieldNameCntr}) = tempResult(fileIdx(fileCntr)).result.(fieldNames{fieldNameCntr}); %#ok
                 end
