@@ -745,7 +745,7 @@ classdef slurm < handle
                             result = o.command(['mkdir ' userFolderDir]); %#ok<NASGU>
                         end
                     %1.2 create the folder for the collated result within the user's sibdo folder    
-                        finalFolderDir = strrep(fullfile(o.headRootDir,finalFolderName),'\','/');
+                        finalFolderDir = strrep(fullfile(o.headRootDir,finalFolderName, '/'),'\','/');
                         if ~o.exist(finalFolderDir,'dir')
                             result = o.command(['mkdir ' finalFolderDir]); %#ok<NASGU>
                         end
@@ -1580,7 +1580,7 @@ classdef slurm < handle
             
          	resultFileNames = dir(jobDir);
             resultFileNames = {resultFileNames.name};
-            match = contains(resultFileNames,'.results.mat');
+            match = contains(resultFileNames,'.result.mat');
             resultFileNames = resultFileNames(match);
 
             fileNrEndIdx = cell2mat(strfind(resultFileNames,'.results.mat'));
