@@ -776,7 +776,6 @@ classdef slurm < handle
                 save(localDataFile,'data','-v7.3'); % 7.3 needed to allow partial loading of the data in each worker.
                 % Copy the data file to the cluster
                 if ~p.Results.debug
-                    warning('transferring dataset')
                     o.put(localDataFile,jobGroupDir);
                 end              
 
@@ -1591,18 +1590,27 @@ classdef slurm < handle
             for fileCntr = 1:length(resultFileNames)
                 fileIdx(fileCntr) = str2double(resultFileNames{fileCntr}(1:fileNrEndIdx(fileCntr)-1));
                 tempResult(fileIdx(fileCntr)) = load([jobDir '/' num2str(fileIdx(fileCntr)) '.result.mat']);
+                %simplify the output to just 'result(1:nrInArray).fieldnames
+                %instead of result(1:nrInArray).result.fieldnames
+                fieldNames = fieldname(tempResult(fileIdx(fileCntr)).result);
+                for fieldNameCntr = 1:length(fieldNames)
+                    preResult(fileIdx(fileCntr)).(fieldNames{fieldNameCntr}) = tempResult(fileIdx(fileCntr)).result.(fieldNames{fieldNameCntr}); %#ok
+                end
             end
+            
+
+            
             
             %decide how tasks should be collated
             switch p.Results.collateAction
                 case 'default'	%the user didn't specify, so the result will be a struct array (result(1:nrInArray).result....)
-                    result = tempResult;
+                    result = preResult;
                 case 'specialCollateFile'   %the user made a special mFile that should be called to collate the results
-                    result = feval(p.Results.mFile,tempResult);
+                    result = feval(p.Results.mFile,preResult);
                 case 'containsCollate'  %the function that was called for each task also contains a p.parameter 'action' 
                                         %and that parameter can be resolved with the input 'collate'
                                         %-> user that function and tell it to collate data
-                    result = feval(p.Results.mFile,tempResult,'action','collate');
+                    result = feval(p.Results.mFile,preResult,'action','collate');
             end
                     
             
