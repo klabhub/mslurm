@@ -745,7 +745,7 @@ classdef slurm < handle
                             result = o.command(['mkdir ' userFolderDir]); %#ok<NASGU>
                         end
                     %1.2 create the folder for the collated result within the user's sibdo folder    
-                        finalFolderDir = strrep(fullfile(o.headRootDir,finalFolderName, '/'),'\','/');
+                    	finalFolderDir = strrep(fullfile(o.headRootDir,finalFolderName, '/'),'\','/');
                         if ~o.exist(finalFolderDir,'dir')
                             result = o.command(['mkdir ' finalFolderDir]); %#ok<NASGU>
                         end
@@ -1690,7 +1690,11 @@ classdef slurm < handle
                 filename = [p f e];
             end
             fName =fullfile(tempDir,filename);
-            save(fName,'result');
+            try
+                save(fName,'result');
+            catch
+                save(fName,'result','-v7.3');
+            end
             % Copy to head
             scpCommand = ['scp ' fName ' ' jobDir];
             tic;
