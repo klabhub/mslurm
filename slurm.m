@@ -1690,11 +1690,8 @@ classdef slurm < handle
                 filename = [p f e];
             end
             fName =fullfile(tempDir,filename);
-            try
-                save(fName,'result');
-            catch
-                save(fName,'result','-v7.3');
-            end
+            save(fName,'result','-v7.3');
+
             % Copy to head
             scpCommand = ['scp ' fName ' ' jobDir];
             tic;
