@@ -646,8 +646,9 @@ classdef slurm < handle
         
         
         function [jobId,result] = taskBatch(o,fun,data,args,varargin)
-        %function result = taskBatch(o,fun,data,args,varargin)
-
+        %function [jobId,result] = taskBatch(o,fun,data,args,varargin)
+        %
+        %
             %did the user provide additional inut arguments for the function they want
             %to run on the cluster
             if isempty(args)
@@ -708,7 +709,9 @@ classdef slurm < handle
           	addParameter(p,'uniqueOutputName',true);                        %will the final collated filename reflect the uniqueID that is automatically generated?
                                                                             %true [default]: the same analysis can be performed multiple times and none will be overwritten
                                                                             %false: the next time that this analysis is run, previous data will be overwritten
-          	addParameter(p,'outputFolder',[],@ischar);
+            addParameter(p,'collateFun','',@ischar);                        %allow user to specify a function that knows how to collate their data
+            addParameter(p,'collateFunInputArgs',[]);                     	%allow user to specify additional input arguments to their collate function
+            addParameter(p,'outputFolder',[],@ischar);
           	addParameter(p,'addJobName',[],@ischar);                        %additional info that will be part of the jobName on the cluster
             addParameter(p,'from',7);                                   %if data is a jobID or job(Group)Name, then specify how many days ago to original dataset was submitted
                                                                             %default: 1 day ago;
@@ -720,6 +723,14 @@ classdef slurm < handle
                 error('The input arguments do not have a field "tasks". Use that field to provide instructions for what each node/worker is supposed to do')
             end
 
+            %if collateFunInputArgs has been specified then it should be a
+            %cell array in the format
+            %{inputName1,value1,inputName2,value2, ..., etc.)
+            if ~iscell(p.Results.collateFunInputArgs) || ~isequal(rem(length(p.Results.collateFunInputArgs),2),0)
+                error('"collateFunInputArgs" has to be a cell array with an even number of inputNames and inputValues')
+            end
+            
+            
         %check if 'data' is real data or if it just refers to an already existing dataset
         switch dataType
             case 'jobID' %if we only know the jobID, then we need to find the actual jobName to find out what folder the data got uploaded to for that previous job
@@ -861,35 +872,8 @@ classdef slurm < handle
             if ~isempty(jobID)  %jobs have been submitted succesfully
                 dependency = sprintf('afterany:%s',num2str(jobID));  %execute this after the arrayJob has been succesfully submitted
                 
-                %check if a collate function exists that is specific to 'fun'
-                %Option 1: a collate statement can be found in 'fun'
-                            %-> the user specified a parameter called 'action'
-                            %-> a switch statement exists to collate the results instead of performing an analysis
-                funFile = [fun '.m'];           %the filename of the function
-                funText = fileread(funFile);    %read the function as text
-
-                %Option 2: a unique collate function 'fun_collate' can be found
-                specialCollateFun = [fun '_collate'];
-
-                %Option 3: no instructions on how the taskBatch-jobs should be
-                %collated. In that case, just create a struct-array
-                %result(1:nrInArray).data ...
-
-                if contains(funText,'action') &&  contains(funText,'case "COLLATE"')
-                %option 1
-                    collateFun = fun;
-                    collateAction = 'containsCollate';  
-                elseif isequal(exist(specialCollateFun,'file'),2)
-                %option 2
-                 	collateFun = specialCollateFun;
-                    collateAction = 'specialCollateFile';  
-                else
-             	%option 3
-                    collateFun = '';
-                 	collateAction = 'default';
-                end
                 %run the collateJob (via sbatch, which will run taskBatchRun)
-             	collateJobId  = o.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',collateFun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',finalFolderDir,'collateAction',collateAction,'totalNrTasks',nrInArray},'runOptions',p.Results.runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug); 
+             	collateJobId  = o.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',p.Results.collateFun,'collateFunExtraIn',p.Results.collateFunInputArgs,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',finalFolderDir,'collateAction',collateAction,'totalNrTasks',nrInArray},'runOptions',p.Results.runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug); 
             end
            
             jobId.taskIds = jobID;
@@ -1506,23 +1490,12 @@ classdef slurm < handle
                 addParameter(p,'dataFile','');
                 addParameter(p,'argsFile','');
                 addParameter(p,'mFile','');
+                addParameter(p,'collateFunExtraIn',[]);
                 addParameter(p,'nodeTempDir','');
                 addParameter(p,'jobDir','');
                 addParameter(p,'totalNrTasks','');                
-                addParameter(p,'userSibdoDir','');                
-                addParameter(p,'collateAction','');            
+                addParameter(p,'userSibdoDir','');                        
             parse(p,varargin{:});
-
-            %a path to args will always be submitted to this function
-%           	argsMatFile = matfile(p.Results.argsFile);
-%             argsMatFileInfo = whos(argsMatFile,'args');
-% 
-%                 if prod(argsMatFileInfo.size)>1
-%                     totalNrTasks = argsMatFile.args(1,1).totalNrTasks;
-%                 else
-%                     tempArgs = argsMatFile.args;
-%                     totalNrTasks = tempArgs.totalNrTasks;
-%                 end
 
             %if this is a collate job, then the taskNr will be 0, otherwise
             %it will be the taskNr out of the numbers 1:nrInArray
@@ -1570,7 +1543,7 @@ classdef slurm < handle
                 slurm.saveResult([num2str(taskNr) '.result.mat'],result,p.Results.nodeTempDir,p.Results.jobDir);
                 
             else %this means taskNr is 0 and we should collate instead
-             	result = slurm.taskBatchCollate(p.Results.jobDir,'mFile',p.Results.mFile,'collateAction',p.Results.collateAction,'totalNrTasks',p.Results.totalNrTasks); % Pass all cells of the row to the mfile as argument (plus optional args)
+             	result = slurm.taskBatchCollate(p.Results.jobDir,'mFile',p.Results.mFile,'collateFunExtraIn',p.Results.collateFunExtraIn,'totalNrTasks',p.Results.totalNrTasks); % Pass all cells of the row to the mfile as argument (plus optional args)
                 
                 %transfer the collated result tot he user's sibdo folder
               	slurm.saveResult('collated.mat',result,p.Results.nodeTempDir,p.Results.userSibdoDir);                
@@ -1583,15 +1556,14 @@ classdef slurm < handle
         %collate results from calling taskBatch, either by combining them 
         %into a struct-array, 
         %or by using a function that the user specifically made to collate those results,
-        %or by specifying the parameter field 'action' with the input 'collate', in 'taskBatch('fun',...)'
+        %(with the option to use additional input arguments they specified
+        %in slurm.taskBatch('collateFunInputArgs',userCollateFunArgs) and which is called
+        %'collateFunExtraIn' here
   
-            defaultCollateAction = 'default';
-            collateActionOptions = {'default'; 'specialCollateFile'; 'containsCollate'};
-            
           	p = inputParser;
                 addParameter(p,'mFile','');
                 addParameter(p,'totalNrTasks',1,@isnumeric);
-                addParameter(p,'collateAction',defaultCollateAction,@(x) any(validatestring(upper(x),collateActionOptions)));
+                addParameter(p,'collateFunExtraIn',[]);
             parse(p,varargin{:});
             
          	resultFileNames = dir(jobDir);
@@ -1616,22 +1588,20 @@ classdef slurm < handle
             end
             
 
-            
-            
             %decide how tasks should be collated
-            switch p.Results.collateAction
-                case 'default'	%the user didn't specify, so the result will be a struct array (result(1:nrInArray).result....)
+            if isempty(p.Results.collateFun) %the user didn't specify, so the result will be a struct array (result(1:nrInArray).result....)
                     result = preResult;
-                case 'specialCollateFile'   %the user made a special mFile that should be called to collate the results
+            elseif ~isempty(p.Results.collateFun) && isempty(p.Results.collateFunExtraIn)   %the user specified a function but not additional input arguments along with it
                     result = feval(p.Results.mFile,preResult);
-                case 'containsCollate'  %the function that was called for each task also contains a p.parameter 'action' 
-                                        %and that parameter can be resolved with the input 'collate'
-                                        %-> user that function and tell it to collate data
-                    result = feval(p.Results.mFile,preResult,'action','collate');
+            elseif ~isempty(p.Results.collateFun) && ~isempty(p.Results.collateFunExtraIn)  %the user specified a function and additional input arguments along with it
+                %make p.Results.collateFunExtraIn into an struct of input
+                %arguments and pass that struct to the user's collate function
+                for inputArgCntr = 1:2:length(p.Results.collateFunExtraIn)
+                    inputArgs.(p.Results.collateFunExtraIn{inputArgCntr}) = p.Results.collateFunExtraIn{inputArgCntr+1};
+                end
+                
+            	result = feval(p.Results.mFile,preResult,inputArgs);
             end
-                    
-            
-            
         end
         
         function fileInFileOutRun(jobID,taskNr,varargin) %#ok<INUSL>
