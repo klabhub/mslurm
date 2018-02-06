@@ -654,17 +654,8 @@ classdef slurm < handle
                 error(['No input arguments provided for the function "' fun '" to run on the cluster. Provide at least "args.tasks" or consider using o.feval or o.sbatch instead of o.taskBatch.'])
             end
 
-            %how many jobs should be submitted depends either on data or args
-            %(whichever has more, as long as one of them has several dimensions)
-            if isstruct(data) && isstruct(args)
-                if isequal(numel(data),numel(args)) %both struct arrays are of the same size
-                    nrInArray = numel(args);
-                elseif isequal((numel(data)+numel(args)),(max(numel(data),numel(args))+1)) %one is a struct array the other one is a struct
-                    nrInArray = max(numel(data),numel(args));
-                else
-                    error('If data and args are both struct arrays, then they must be of equal length. Otherwise only one of them can be a struct array and the other one must be a struct.')
-                end
-            elseif iscell(data)
+            %how many jobs should be submitted depends on the size of args.tasks
+            if iscell(data)
                 if isempty(args)
                     error('No input provided for "args". Either specify that variable or consider using either o.feval or o.sbatch instead of taskBatch to submit jobs.');
                 elseif isequal(length(args),1)
@@ -673,10 +664,10 @@ classdef slurm < handle
                            nrInArray = length(args.tasks);
                         end
                     catch
-                        error('"args" must either be a struct array or contain the field "tasks". In that case "tasks" needs to be a struct array and contain the field "subtasks".');
+                        error('"args" must be a struct that contains the field "tasks" which should be a cell array which size defines the number of tasks submitted.');
                     end
                 elseif length(args)>1
-                    nrInArray = length(args);
+                        error('"args" must be a struct that contains the field "tasks" which should be a cell array which size defines the number of tasks submitted.');
                 end
             elseif ischar(args)
                 error('"args" cannot be strings but needs to be real data');
@@ -1540,89 +1531,38 @@ classdef slurm < handle
            	%preload data and args to pass (slices/subsets) to workers
                 dataMatFile = matfile(p.Results.dataFile); % Matfile object for the data so that we can pass a slice
                 dataMatFileInfo = whos(dataMatFile,'data');
-            	argsMatFile = matfile(p.Results.argsFile);
-                argsMatFileInfo = whos(argsMatFile,'args');
+            	argsMatFile = matfile(p.Results.argsFile); % Matfile object for the args so that we can slect slices of of data
             
-                %determine what kind of input the dataFile and the argsFile
-                %are, so that we can select (subsets) that will be passed to
-                %the workers. Case 1 assumes that all data and instructions is
-                %independent from each other, up to case 4 which assumes that
-                %all data is shared but data, as well as args only need a small
-                %amount to be passed to each worker. The main purpose is to
-                %avoid uploading the same data multiple times in case there is overlap
-                %between the datasets that workers need
-                % case 1: data and args are both struct arrays of the same length
-                %       -> pass 1 slice of each to the worker, based on taskNr
-                % case 2: data is a struct and args is a struct array
-                %       -> pass the same data to each worker but a different args slice (based on taskNr)
-                % case 3: data is a cell array and args is a struct array
-                %       -> pass a subset of data, which will be selected based
-                %       on the 'tasks'-field of args(taskNr).tasks
-                % case 4: data is a cell array and args is a struct which
-                %         contains the field 'tasks', which is a cell array
-                %       -> pass a subset of data, and a subset of data in args of whatever has the same size as data.
+                %data is a cell array and args is a struct which
+                %	contains the field 'tasks', which is a cell array
+                % 	-> pass a subset of data, and a subset of data in args of whatever has the same size as data.
                 %       Both subsets will be selected based on args.tasks{taskNr}
-                %       (this case is essentially the same as case 3)
 
-                if strcmpi(dataMatFileInfo.class,'struct')
-                    if strcmpi(argsMatFileInfo.class,'struct')
-                        %case 1
-                        if isequal(prod(dataMatFileInfo.size),prod(argsMatFileInfo.size))
-                            dataSlice.data = dataMatFile.data(taskNr,:);
-                            args = argsMatFile.args(taskNr,:);
-                        %case 2
-                        elseif prod(argsMatFileInfo.size)>1
-                            dataSlice.data = dataMatFile.data;
-                            args = argsMatFile.args(taskNr,:);
-                        end
+                fullArgsFile = argsMatFile.args;
+                    argsTemp = rmfield(fullArgsFile,'tasks');                      
+                    subTasks = fullArgsFile.tasks{taskNr};
+                    args = argsTemp;
+                    args.tasks = subTasks;
+
+                uDataIdx = unique(args.tasks);
+                dataSlice.data = cell(dataMatFileInfo.size);
+                for dataColCntr = 1:size(dataSlice.data,2)
+                    for uDataCntr = 1:numel(uDataIdx)
+                        dataSlice.data{uDataIdx(uDataCntr),dataColCntr} = cell2mat(dataMatFile.data(uDataIdx(uDataCntr),dataColCntr));
                     end
-                elseif strcmpi(dataMatFileInfo.class,'cell')
-                    %if data is provided as a cell array then the assumption is
-                    %that only particular cells should be passed to each worker.
-                    %Which cells those are should be provided in either 
-                    %args(taskNr).tasks or args.tasks(taskNr).subtasks
-
-                    %case 3
-                    if strcmpi(argsMatFileInfo.class,'struct') && prod(argsMatFileInfo.size)>1
-                        args = argsMatFile.args(taskNr,:);
-                        %if data is provided as a cell array then the
-                        %assumption is that only particular cells should be
-                        %passed to each worker. args
-                        uDataIdx = unique(args.tasks);
-                        dataSlice.data = cell(dataMatFileInfo.size);
-                        for dataColCntr = 1:size(dataSlice.data,2)
-                            for uDataCntr = 1:numel(uDataIdx)
-                                dataSlice.data{uDataIdx(uDataCntr),dataColCntr} = cell2mat(dataMatFile.data(uDataIdx(uDataCntr),dataColCntr));
-                            end
-                        end
-                    %case 4
-                    elseif isequal(prod(argsMatFileInfo.size),1)
-                        fullArgsFile = argsMatFile.args;
-                            argsTemp = rmfield(fullArgsFile,'tasks');                      
-                            subTasks = fullArgsFile.tasks{taskNr};
-                            args = argsTemp;
-                            args.tasks = subTasks;
-
-                        uDataIdx = unique(args.tasks);
-                        dataSlice.data = cell(dataMatFileInfo.size);
-                        for dataColCntr = 1:size(dataSlice.data,2)
-                            for uDataCntr = 1:numel(uDataIdx)
-                                dataSlice.data{uDataIdx(uDataCntr),dataColCntr} = cell2mat(dataMatFile.data(uDataIdx(uDataCntr),dataColCntr));
-                            end
-                        end
-                        %now get rid of all cells in args that are not needed
-                        argsFieldNames = fieldnames(args);
-                        for fieldNameCntr = 1:length(argsFieldNames)
-                            if isequal(size(args.(argsFieldNames{fieldNameCntr})),size(dataSlice.data))
-                                args.(argsFieldNames{fieldNameCntr}) = cell(dataMatFileInfo.size);
-                                for colCntr = 1:size(dataSlice.data,2)
-                                    useIdx =  find(~cellfun(@isempty,dataSlice.data(:,2)));
-                                    args.(argsFieldNames{fieldNameCntr})(useIdx,colCntr) = fullArgsFile.(argsFieldNames{fieldNameCntr})(useIdx,colCntr);
-                                end
-                            end
+                end
+                %now get rid of all cells in args that are not needed
+                argsFieldNames = fieldnames(args);
+                for fieldNameCntr = 1:length(argsFieldNames)
+                    if isequal(size(args.(argsFieldNames{fieldNameCntr})),size(dataSlice.data))
+                        args.(argsFieldNames{fieldNameCntr}) = cell(dataMatFileInfo.size);
+                        for colCntr = 1:size(dataSlice.data,2)
+                            useIdx =  find(~cellfun(@isempty,dataSlice.data(:,2)));
+                            args.(argsFieldNames{fieldNameCntr})(useIdx,colCntr) = fullArgsFile.(argsFieldNames{fieldNameCntr})(useIdx,colCntr);
                         end
                     end
                 end
+
                  
                 result = feval(p.Results.mFile,dataSlice.data,args); % Pass all cells of the row to the mfile as argument (plus optional args)
 
