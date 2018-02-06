@@ -678,17 +678,30 @@ classdef slurm < handle
                 elseif length(args)>1
                     nrInArray = length(args);
                 end
-            elseif ischar(data) || ischar(args)
-                error('"data" and "args" cannot be strings but need to be real data');
+            elseif ischar(args)
+                error('"args" cannot be strings but needs to be real data');
+            elseif ischar(data)
+              	%this option will be reserved for referencing previously submitted jobs 
+                %to recycle data that already exists on the cluster
+                if ~isequal(sum(isletter(data)),0)
+                    warning(['checking whether data from the job with the name: "' data '" still exists...'])
+                    dataType = 'jobName';
+                elseif isequal(sum(isletter(data)),0)
+                    warning(['checking whether data from the job with the ID: "' data '" still exists...'])
+                  	dataType = 'jobID';
+                else
+                    dataType = 'realData';
+                end
+                
             else  %we really shouldn't end up here...
-                error('There is something wrong with either "data" or "args". Please look into what you submitted. "data" needs to be a struct (-array) or cell array and "needs to be a struct or struct array.');
+                error('There is something wrong with either "data" or "args". Please look into what you submitted. "data" needs to be a struct (-array) or cell array and "args" needs to be a struct or struct array.');
             end
 
           
             %put data and args into the right format
-            if isrow(data)
+            if isrow(data) && ~ischar(data)
                 % This is interpreted as a column.
-                data = data';
+                data = data';   %#ok
             end
             if isrow(args)
                 args = args';
@@ -703,7 +716,11 @@ classdef slurm < handle
             addParameter(p,'runOptions','');
           	addParameter(p,'uniqueOutputName',true);                        %will the final collated filename reflect the uniqueID that is automatically generated?
                                                                             %true [default]: the same analysis can be performed multiple times and none will be overwritten
-                                                                            %false: the next time that
+                                                                            %false: the next time that this analysis is run, previous data will be overwritten
+          	addParameter(p,'outputFolder',[],@ischar);
+          	addParameter(p,'addJobName',[],@ischar);                        %additional info that will be part of the jobName on the cluster
+            addParameter(p,'from',7);                                   %if data is a jobID or job(Group)Name, then specify how many days ago to original dataset was submitted
+                                                                            %default: 1 day ago;
             addParameter(p,'debug',false);
             parse(p,varargin{:});
 
@@ -712,27 +729,77 @@ classdef slurm < handle
                 error('The input arguments do not have a field "tasks". Use that field to provide instructions for what each node/worker is supposed to do')
             end
 
+        %check if 'data' is real data or if it just refers to an already existing dataset
+        switch dataType
+            case 'jobID' %if we only know the jobID, then we need to find the actual jobName to find out what folder the data got uploaded to for that previous job
+                tempSelector = slurmSelector('gui', false, 'from', now-p.Results.from);
+                allJobIDs = {tempSelector.jobs.JobID};
+                targetJobIDIdx = find(contains(allJobIDs,data));
+                if isempty(targetJobIDIdx)
+                    error(['No job with the ID ' data ' could be found within the last ' num2str(p.Results.from) ' days'])
+                end
+                allJobNames = {tempSelector.jobs.JobName};
+                targetJobName = allJobNames{targetJobIDIdx(1)};
+                targetJobFolder = strrep(fullfile(o.remoteStorage,erase(targetJobName,'-taskBatch'),'/'),'\','/');
+                remoteDataFile = [targetJobFolder erase(targetJobName,'-taskBatch') '_data.mat'];
+                localDataFile = [o.localStorage erase(targetJobName,'-taskBatch') '_data.mat'];
+            case 'jobName' %if we know the jobName then we basically know the folder already
+                targetJobFolder = strrep(fullfile(o.remoteStorage,erase(data,'-taskBatch'),'/'),'\','/');
+                targetJobName = data;
+            	remoteDataFile = [targetJobFolder erase(data,'-taskBatch') '_data.mat'];
+                localDataFile = [o.localStorage erase(data,'-taskBatch') '_data.mat'];
+            case 'realData'
+                remoteDataFile = [];                
+        end
+        
+        %check if folder and data still exist
+        if ~isempty(remoteDataFile)
+            if o.exist(targetJobFolder,'dir')
+                if ~o.exist([targetJobFolder erase(targetJobName,'-taskBatch') '_data.mat'])
+                    error(['the data file "' erase(targetJobName,'-taskBatch') '_data.mat"  does not exist anymore. You need to upload data for your job']);
+                else
+                    warning('... data found')
+                end
+            else
+                error(['the folder "' targetJobFolder '"  does not exist anymore. You need to upload data for your job']);
+            end
+        end
+            
         %create the jobGroup that is send to the cluster        
             %create a unique jobName for the group of tasks that is run on the cluster
             %but users are allowed to name the final output file, which
             %will be reflected in the name of the jobGroup
             uid = datestr(now,'yymmdd_HHMMSS');
             
-            if isfield(args,'outputName')
-                if ~isempty(args(1).outputName)
-                    jobGroupName = cat(2,fun,'_', args(1).outputName, '_', uid);
+            %where should the collated result from the taskBatch be saved
+            if ~isempty(p.Results.outputFolder) %the user knows exactly where the result should end up
+                if p.Results.uniqueOutputName
+                    finalFolderName =  ['sibdo/' getenv('USERNAME') '/' p.Results.outputFolder uid '/'];
+                else
+                    finalFolderName =  ['sibdo/' getenv('USERNAME') '/' p.Results.outputFolder];
+                end
+            else
+                if ~isempty(p.Results.addJobName) %the user doesn't have a specific folder structure in mind 
+                    %but a clear idea how the job should be called and we
+                    %can use that to create that final folder
                     if p.Results.uniqueOutputName
-                        finalFolderName =  ['sibdo/' getenv('USERNAME') '/' args.outputName '_' fun '_', uid]; % Where results end up;
+                        finalFolderName =  ['sibdo/' getenv('USERNAME') '/' p.Results.addJobName '_' uid '/'];
                     else
-                        finalFolderName =  ['sibdo/' getenv('USERNAME') '/' args.outputName '_' fun];
+                        finalFolderName =  ['sibdo/' getenv('USERNAME') '/' p.Results.addJobName '/']; 
                     end
+                else %the user has now opinion on how to call the job and where to save the result
+                    %this might be problematic if the same function will run on future jobs 
+                    %because those separete results will be hard to distinguish 
+                    finalFolderName =  ['sibdo/' getenv('USERNAME') '/' fun '_' uid '/'];
+                    warning('consider specifying either "jobName" or "outputFolder" or both so make your job and/or the folder where the results be saved more distinguishable. In particular if you are going to use this function for future but different jobs')
                 end
-            else %in case that the user did not choose a particular name
+            end
+
+            %how should the job be called on the cluster
+            if ~isempty(p.Results.addJobName)
+                jobGroupName = cat(2,fun,'_', p.Results.addJobName, '_', uid);
+            else
                 jobGroupName = cat(2,fun,'_', uid);
-                finalFolderName =  ['sibdo/' getenv('USERNAME') '/' fun '_' uid];
-                if ~p.Results.uniqueOutputName
-                    warning('If no outputName is specified in args.outputName, then keepUniqueOutputName will be set to true')
-                end
             end
             
             %create directories on the cluster where temporary and final results can be stored
@@ -740,20 +807,33 @@ classdef slurm < handle
                 %result will be saved for good
                     %1.1 check if the users's sibdo folder exists and create
                     %that folder if it doesnt
-                        userFolderDir = strrep(fullfile(o.headRootDir,['sibdo/' getenv('USERNAME')]),'\','/');
+                        userFolderDir = strrep(fullfile(o.headRootDir,['sibdo/' getenv('USERNAME') '/']),'\','/');
                         if ~o.exist(userFolderDir,'dir')
-                            result = o.command(['mkdir ' userFolderDir]); %#ok<NASGU>
+                            result = o.command(['mkdir ' userFolderDir]);
                         end
                     %1.2 create the folder for the collated result within the user's sibdo folder    
                     	finalFolderDir = strrep(fullfile(o.headRootDir,finalFolderName, '/'),'\','/');
-                        if ~o.exist(finalFolderDir,'dir')
-                            result = o.command(['mkdir ' finalFolderDir]); %#ok<NASGU>
+                        %since we cannot add folders with many subfolders
+                        %in one go, we need to split this into a loop
+                        tempFinalFolder =  erase(finalFolderDir,userFolderDir);
+                        appendedFolderName = userFolderDir;
+                        folderIdx = strfind(tempFinalFolder,'/');
+                        startIdx = 1;
+                        subFolderNames = cell(1,numel(folderIdx)-1);
+                        for folderCntr = 1:numel(folderIdx)-1
+                            subFolderNames{folderCntr} = tempFinalFolder(startIdx:folderIdx(folderCntr));
+                            startIdx = folderIdx(folderCntr)+1;
+                            appendedFolderName = [appendedFolderName subFolderNames{folderCntr}]; %#ok
+                            if ~o.exist(appendedFolderName,'dir')
+                                result = o.command(['mkdir ' appendedFolderName]);
+                            end
                         end
+                        
 
                 %2. create a folder in the remoteStorage to save the task results from each worker,
                     jobGroupDir = strrep(fullfile(o.remoteStorage,jobGroupName),'\','/');           
                     if ~o.exist(jobGroupDir,'dir')
-                        result = o.command(['mkdir ' jobGroupDir]); %#ok<NASGU>
+                        result = o.command(['mkdir ' jobGroupDir]);
                     end
                 
 
@@ -769,7 +849,9 @@ classdef slurm < handle
                     o.put(localArgsFile,jobGroupDir);
                 end
 
-         	%specify the file(s) that the function should run on and upload it to the cluster
+         	%specify the file(s) that the function should run on and upload
+         	%it to the cluster (if necessary)
+            if isempty(remoteDataFile)
                 % Save a local copy of the input data
                 localDataFile = fullfile(o.localStorage,[jobGroupName '_data.mat']);
                 remoteDataFile = strrep(fullfile(o.remoteStorage,jobGroupName,[jobGroupName '_data.mat']),'\','/');
@@ -777,7 +859,8 @@ classdef slurm < handle
                 % Copy the data file to the cluster
                 if ~p.Results.debug
                     o.put(localDataFile,jobGroupDir);
-                end              
+                end
+            end
 
             %run all tasks as an arrayJob     
          	jobID = o.sbatch('jobName',[jobGroupName '-taskBatch'] ,'uniqueID','','batchOptions',p.Results.batchOptions,'mfile','slurm.taskBatchRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',userFolderDir},'runOptions',p.Results.runOptions,'nrInArray',nrInArray,'debug',p.Results.debug);
@@ -801,7 +884,7 @@ classdef slurm < handle
                 %collated. In that case, just create a struct-array
                 %result(1:nrInArray).data ...
 
-                if contains(funText,'action') &&  contains(funText,'case "collate"')
+                if contains(funText,'action') &&  contains(funText,'case "COLLATE"')
                 %option 1
                     collateFun = fun;
                     collateAction = 'containsCollate';  
@@ -1540,13 +1623,7 @@ classdef slurm < handle
                         end
                     end
                 end
-
-                %remove information that we smuggled into the user defined
-                %arguments but that hte user's function will not be able to
-                %handle
-                    args = rmfield(args,'outputName');
-                	%args = rmfield(args,'totalNrTasks');
-                    
+                 
                 result = feval(p.Results.mFile,dataSlice.data,args); % Pass all cells of the row to the mfile as argument (plus optional args)
 
                 % Save the result in the jobDir as 1.result.mat, 2.result.mat, etc.
