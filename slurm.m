@@ -679,17 +679,8 @@ classdef slurm < handle
             if iscell(data)
                 if isempty(args)
                     error('No input provided for "args". Either specify that variable or consider using either o.feval or o.sbatch instead of taskBatch to submit jobs.');
-                elseif isequal(length(args),1)
-                    try
-                        if iscell(args.tasks)
-                           nrInArray = length(args.tasks);
-                        end
-                    catch
-                        error('"args" must be a struct that contains the field "tasks" which should be a cell array which size defines the number of tasks submitted.');
-                    end
-                elseif length(args)>1
-                        error('"args" must be a struct that contains the field "tasks" which should be a cell array which size defines the number of tasks submitted.');
                 end
+                dataType = 'realData';
             elseif ischar(args)
                 error('"args" cannot be strings but needs to be real data');
             elseif ischar(data)
@@ -701,15 +692,22 @@ classdef slurm < handle
                 elseif isequal(sum(isletter(data)),0)
                     warning(['checking whether data from the job with the ID: "' data '" still exists...'])
                   	dataType = 'jobID';
-                else
-                    dataType = 'realData';
                 end
                 
             else  %we really shouldn't end up here...
                 error('There is something wrong with either "data" or "args". Please look into what you submitted. "data" needs to be a struct (-array) or cell array and "args" needs to be a struct or struct array.');
             end
 
-          
+            %how many tasks should be submitted
+            if isequal(length(args),1)
+                try
+                    if iscell(args.tasks)
+                       nrInArray = length(args.tasks);
+                    end
+                catch
+                    error('"args" must be a struct that contains the field "tasks" which should be a cell array which size defines the number of tasks submitted.');
+                end
+            end
             %put data and args into the right format
             if isrow(data) && ~ischar(data)
                 % This is interpreted as a column.
@@ -744,10 +742,11 @@ classdef slurm < handle
             end
 
             %if collateFunInputArgs has been specified then it should be a
-            %cell array in the format
-            %{inputName1,value1,inputName2,value2, ..., etc.)
-            if ~iscell(p.Results.collateFunInputArgs) || ~isequal(rem(length(p.Results.collateFunInputArgs),2),0)
-                error('"collateFunInputArgs" has to be a cell array with an even number of inputNames and inputValues')
+            %struct with the format collateFunInputArgs.(name1) = value1;
+            % ...collateFunInputArgs.(name2) = value2;
+
+            if ~isstruct(p.Results.collateFunInputArgs)
+                error('"collateFunInputArgs" has to be a struct')
             end
             
             
@@ -893,7 +892,7 @@ classdef slurm < handle
                 dependency = sprintf('afterany:%s',num2str(jobID));  %execute this after the arrayJob has been succesfully submitted
 
                 %run the collateJob (via sbatch, which will run taskBatchRun)
-                collateJobId  = o.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',p.Results.collateFun,'collateFunExtraIn',p.Results.collateFunInputArgs,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',finalFolderDir,'collateAction',collateAction,'totalNrTasks',nrInArray},'runOptions',p.Results.runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug); 
+                collateJobId  = o.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',p.Results.collateFun,'collateFunExtraIn',p.Results.collateFunInputArgs,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',finalFolderDir,'totalNrTasks',nrInArray},'runOptions',p.Results.runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug); 
             end
 
             jobInfo.taskIds = jobID;
@@ -1614,14 +1613,8 @@ classdef slurm < handle
                     result = preResult;
             elseif ~isempty(p.Results.collateFun) && isempty(p.Results.collateFunExtraIn)   %the user specified a function but not additional input arguments along with it
                     result = feval(p.Results.mFile,preResult);
-            elseif ~isempty(p.Results.collateFun) && ~isempty(p.Results.collateFunExtraIn)  %the user specified a function and additional input arguments along with it
-                %make p.Results.collateFunExtraIn into an struct of input
-                %arguments and pass that struct to the user's collate function
-                for inputArgCntr = 1:2:length(p.Results.collateFunExtraIn)
-                    inputArgs.(p.Results.collateFunExtraIn{inputArgCntr}) = p.Results.collateFunExtraIn{inputArgCntr+1};
-                end
-                
-            	result = feval(p.Results.mFile,preResult,inputArgs);
+            elseif ~isempty(p.Results.collateFun) && ~isempty(p.Results.collateFunExtraIn)  %the user specified a function and additional input arguments along with it             
+            	result = feval(p.Results.mFile,preResult,p.Results.collateFunExtraIn);
             end
         end
         
