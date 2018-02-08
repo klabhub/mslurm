@@ -655,7 +655,10 @@ classdef slurm < handle
         %
         %In case the user uploads their data a call to taskBatch will look
         %approximately like this:
-        %       jobInfo = taskBatch('userFun',data,args,'uniqueOutputName',false,'collateFun','userFun','collateFunInputArgs',{'collate',true,'otherInputStuff',value,...},'outputFolder','me_12Mar2018/frequencyAnalysis/','addJobName','merry_frequencyAnalysis','batchOptions',{'time','23:50:00','partition','day-long'});
+        %       jobInfo = taskBatch('userFun',data,args,'uniqueOutputName',false,'collateFun','userCollateFun','outputFolder','me_12Mar2018/frequencyAnalysis/','addJobName','merry_frequencyAnalysis','batchOptions',{'time','23:50:00','partition','day-long'});
+        %       (userCollateFun can be a function handle such as
+        %       userCollateFun = @(x) userFun(x,'action','collate), to pass
+        %       additional input to the user's function
         %
         %In case the user wants to re-use data that was already uploaded to
         %the cluster with a previous job, the only difference will be what
@@ -728,7 +731,6 @@ classdef slurm < handle
                                                                             %true [default]: the same analysis can be performed multiple times and none will be overwritten
                                                                             %false: the next time that this analysis is run, previous data will be overwritten
             addParameter(p,'collateFun','',@ischar);                        %allow user to specify a function that knows how to collate their data
-            addParameter(p,'collateFunInputArgs',[]);                       %allow user to specify additional input arguments to their collate function
             addParameter(p,'outputFolder',[],@ischar);                      %an outputFolder(with subfolders) to allow the user to keep their analysis organized and distinguishable in their sibdo-folder
           	addParameter(p,'addJobName',[],@ischar);                        %additional info that will be part of the jobName on the cluster
             addParameter(p,'from',7);                                       %if data is a jobID or job(Group)Name, then specify how many days ago to original dataset was submitted
@@ -740,16 +742,7 @@ classdef slurm < handle
             if isempty(args(1).tasks)
                 error('The input arguments do not have a field "tasks". Use that field to provide instructions for what each node/worker is supposed to do')
             end
-
-            %if collateFunInputArgs has been specified then it should be a
-            %struct with the format collateFunInputArgs.(name1) = value1;
-            % ...collateFunInputArgs.(name2) = value2;
-
-            if ~isstruct(p.Results.collateFunInputArgs)
-                error('"collateFunInputArgs" has to be a struct')
-            end
-            
-            
+      
             %check if 'data' is real data or if it just refers to an already existing dataset
             switch dataType
                 case 'jobID' %if we only know the jobID, then we need to find the actual jobName to find out what folder the data got uploaded to for that previous job
@@ -892,7 +885,7 @@ classdef slurm < handle
                 dependency = sprintf('afterany:%s',num2str(jobID));  %execute this after the arrayJob has been succesfully submitted
 
                 %run the collateJob (via sbatch, which will run taskBatchRun)
-                collateJobId  = o.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',p.Results.collateFun,'collateFunExtraIn',p.Results.collateFunInputArgs,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',finalFolderDir,'totalNrTasks',nrInArray},'runOptions',p.Results.runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug); 
+                collateJobId  = o.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',p.Results.collateFun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',finalFolderDir,'totalNrTasks',nrInArray},'runOptions',p.Results.runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug); 
             end
 
             jobInfo.taskIds = jobID;
@@ -1510,7 +1503,6 @@ classdef slurm < handle
                 addParameter(p,'dataFile','');
                 addParameter(p,'argsFile','');
                 addParameter(p,'mFile','');
-                addParameter(p,'collateFunExtraIn',[]);
                 addParameter(p,'nodeTempDir','');
                 addParameter(p,'jobDir','');
                 addParameter(p,'totalNrTasks','');                
@@ -1575,10 +1567,8 @@ classdef slurm < handle
         %
         %collate results from calling taskBatch, either by combining them 
         %into a struct-array, 
-        %or by using a function that the user specifically made to collate those results,
-        %(with the option to use additional input arguments they specified
-        %in slurm.taskBatch('collateFunInputArgs',userCollateFunArgs) and which is called
-        %'collateFunExtraIn' here
+        %or by using a function that the user specifically made to collate those results (see taskBatch),
+
   
           	p = inputParser;
                 addParameter(p,'mFile','');
@@ -1614,7 +1604,7 @@ classdef slurm < handle
             elseif ~isempty(p.Results.collateFun) && isempty(p.Results.collateFunExtraIn)   %the user specified a function but not additional input arguments along with it
                     result = feval(p.Results.mFile,preResult);
             elseif ~isempty(p.Results.collateFun) && ~isempty(p.Results.collateFunExtraIn)  %the user specified a function and additional input arguments along with it             
-            	result = feval(p.Results.mFile,preResult,p.Results.collateFunExtraIn);
+            	result = feval(p.Results.mFile,preResult);
             end
         end
         
