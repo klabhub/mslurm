@@ -1604,7 +1604,7 @@ classdef slurm < handle
             elseif ~isempty(p.Results.collateFun) && isempty(p.Results.collateFunExtraIn)   %the user specified a function but not additional input arguments along with it
                     result = feval(p.Results.mFile,preResult);
             elseif ~isempty(p.Results.collateFun) && ~isempty(p.Results.collateFunExtraIn)  %the user specified a function and additional input arguments along with it             
-            	result = feval(func2str(p.Results.mFile),preResult);
+            	result = feval(str2func(p.Results.mFile),preResult);
             end
         end
         
