@@ -656,9 +656,9 @@ classdef slurm < handle
         %In case the user uploads their data a call to taskBatch will look
         %approximately like this:
         %       jobInfo = taskBatch('userFun',data,args,'uniqueOutputName',false,'collateFun','userCollateFun','outputFolder','me_12Mar2018/frequencyAnalysis/','addJobName','merry_frequencyAnalysis','batchOptions',{'time','23:50:00','partition','day-long'});
-        %       (userCollateFun can be a function handle such as
-        %       userCollateFun = @(x) userFun(x,'action','collate), to pass
-        %       additional input to the user's function
+        %       (userCollateFun can be a function handle such as userCollateFun = @(x) userFun(x,'action','collate), to pass
+        %       additional input to the user's function. 
+        %   IMPORTANT: userCollateFun MUST be a string. Hint: userCollateFun = func2str(userCollateFun);
         %
         %In case the user wants to re-use data that was already uploaded to
         %the cluster with a previous job, the only difference will be what
@@ -730,7 +730,7 @@ classdef slurm < handle
           	addParameter(p,'uniqueOutputName',true);                        %will the final collated filename reflect the uniqueID that is automatically generated?
                                                                             %true [default]: the same analysis can be performed multiple times and none will be overwritten
                                                                             %false: the next time that this analysis is run, previous data will be overwritten
-            addParameter(p,'collateFun','',@ischar);                        %allow user to specify a function that knows how to collate their data
+            addParameter(p,'collateFun','');                        %allow user to specify a function that knows how to collate their data
             addParameter(p,'outputFolder',[],@ischar);                      %an outputFolder(with subfolders) to allow the user to keep their analysis organized and distinguishable in their sibdo-folder
           	addParameter(p,'addJobName',[],@ischar);                        %additional info that will be part of the jobName on the cluster
             addParameter(p,'from',7);                                       %if data is a jobID or job(Group)Name, then specify how many days ago to original dataset was submitted
@@ -1604,7 +1604,7 @@ classdef slurm < handle
             elseif ~isempty(p.Results.collateFun) && isempty(p.Results.collateFunExtraIn)   %the user specified a function but not additional input arguments along with it
                     result = feval(p.Results.mFile,preResult);
             elseif ~isempty(p.Results.collateFun) && ~isempty(p.Results.collateFunExtraIn)  %the user specified a function and additional input arguments along with it             
-            	result = feval(p.Results.mFile,preResult);
+            	result = feval(func2str(p.Results.mFile),preResult);
             end
         end
         
