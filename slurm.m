@@ -1601,7 +1601,8 @@ classdef slurm < handle
             if isempty(p.Results.collateFun) %the user didn't specify, so the result will be a struct array (result(1:nrInArray).result....)
                     result = preResult;
             elseif ~isempty(p.Results.collateFun) %the user specified a function
-            	result = feval(str2func(p.Results.mFile),preResult);
+            	%result = feval(str2func(p.Results.mFile),preResult);
+                result = preResult;
             end
         end
         
