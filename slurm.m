@@ -1555,7 +1555,7 @@ classdef slurm < handle
                 slurm.saveResult([num2str(taskNr) '.result.mat'],result,p.Results.nodeTempDir,p.Results.jobDir);
                 
             else %this means taskNr is 0 and we should collate instead
-             	result = slurm.taskBatchCollate(p.Results.jobDir,'mFile',p.Results.mFile,'collateFunExtraIn',p.Results.collateFunExtraIn,'totalNrTasks',p.Results.totalNrTasks); % Pass all cells of the row to the mfile as argument (plus optional args)
+             	result = slurm.taskBatchCollate(p.Results.jobDir,'mFile',p.Results.mFile,'totalNrTasks',p.Results.totalNrTasks); % Pass all cells of the row to the mfile as argument (plus optional args)
                 
                 %transfer the collated result tot he user's sibdo folder
               	slurm.saveResult('collated.mat',result,p.Results.nodeTempDir,p.Results.userSibdoDir);                
@@ -1573,7 +1573,6 @@ classdef slurm < handle
           	p = inputParser;
                 addParameter(p,'mFile','');
                 addParameter(p,'totalNrTasks',1,@isnumeric);
-                addParameter(p,'collateFunExtraIn',[]);
             parse(p,varargin{:});
             
          	resultFileNames = dir(jobDir);
@@ -1601,9 +1600,7 @@ classdef slurm < handle
             %decide how tasks should be collated
             if isempty(p.Results.collateFun) %the user didn't specify, so the result will be a struct array (result(1:nrInArray).result....)
                     result = preResult;
-            elseif ~isempty(p.Results.collateFun) && isempty(p.Results.collateFunExtraIn)   %the user specified a function but not additional input arguments along with it
-                    result = feval(p.Results.mFile,preResult);
-            elseif ~isempty(p.Results.collateFun) && ~isempty(p.Results.collateFunExtraIn)  %the user specified a function and additional input arguments along with it             
+            elseif ~isempty(p.Results.collateFun) %the user specified a function
             	result = feval(str2func(p.Results.mFile),preResult);
             end
         end
