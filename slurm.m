@@ -766,11 +766,11 @@ classdef slurm < handle
                     remoteDataFile = [];                
             end
 
-            %make collateFun a string by using " instead of ', in case its
-            %a function handle. This is a workaround to make sbatch able to
-            %handle this additional input
+            %replace "'" with '"' in collate fun. 
+            %This is a workaround to make sbatch able to handle this additional input
             if isa(p.Results.collateFun,'function_handle')
-                collateFun = strcat('"',char(p.Results.collateFun),'"');
+                collateFun = char(p.Results.collateFun);
+                collateFun(strfind(collateFun,"'")) = '"';
             elseif ischar(p.Results.collateFun) || isempty(p.Results.collateFun)
                 collateFun = p.Results.collateFun;
             else
@@ -1612,8 +1612,10 @@ classdef slurm < handle
             %decide how tasks should be collated
             if isempty(p.Results.mFile) %the user didn't specify, so the result will be a struct array (result(1:nrInArray).result....)
                     result = preResult;
-            elseif ~isempty(p.Results.mFile) && strcmpi(p.Results.mFile(1),'"')%the user specified a function
-            	result = feval(str2func(strrep(p.Results.mFile,'"','')),preResult); %remove leading and trailing '"' and then make mFile (collateFun) a function handle again
+            elseif ~isempty(p.Results.mFile) && ~isempty(strfind(p.Results.mFile,'"'))%the user specified a function
+                collateFun = p.Results.mFile;
+                collateFun(strfind(collateFun,'"')) = "'";
+            	result = feval(str2func(collateFun),preResult); %remove leading and trailing '"' and then make mFile (collateFun) a function handle again
             elseif ~isempty(p.Results.mFile)
                 result = feval(p.Results.mFile,preResult);  %in case mFile is already the name of a function
             end
