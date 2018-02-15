@@ -1612,9 +1612,19 @@ classdef slurm < handle
             %decide how tasks should be collated
             if isempty(p.Results.mFile) %the user didn't specify, so the result will be a struct array (result(1:nrInArray).result....)
                     result = preResult;
-            elseif ~isempty(p.Results.mFile) && ~isempty(strfind(p.Results.mFile,'"'))%the user specified a function
+            elseif ~isempty(p.Results.mFile) && ~isempty(strfind(p.Results.mFile,','))%a comma shoudl be a good indicator that the user specified additional inputs
                 collateFun = p.Results.mFile;
-                collateFun = str2func(collateFun);
+                %for some reason quotation marks get removed, so lets
+                %re-introduce them before and after commas (unfortunately
+                %this seems tob e necessary in a pretty stupid way since
+                %nothign else seems to work)
+                	collateFun = insertBefore(collateFun,',',"'");
+                    collateFun = insertAfter(collateFun,',',"'");
+                   	collateFun(length(collateFun):length(collateFun)+1) = insertBefore(collateFun(end),')',"'");
+                   	collateFun = strrep(collateFun,"x'",'x');
+                  	collateFun = char(collateFun);
+                 	collateFun = str2func(collateFun);
+             
             	result = collateFun(preResult); %remove leading and trailing '"' and then make mFile (collateFun) a function handle again
             elseif ~isempty(p.Results.mFile)
                 result = feval(p.Results.mFile,preResult);  %in case mFile is already the name of a function
