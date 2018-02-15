@@ -727,7 +727,7 @@ classdef slurm < handle
             p.KeepUnmatched = true;
             addParameter(p,'batchOptions',{});                              %instructions that include information such as wall-time, and partition type
             addParameter(p,'runOptions','');
-          	addParameter(p,'uniqueOutputName',true);                        %will the final collated filename reflect the uniqueID that is automatically generated?
+          	addParameter(p,'uniqueOutputName',false);                        %will the final collated filename reflect the uniqueID that is automatically generated?
                                                                             %true [default]: the same analysis can be performed multiple times and none will be overwritten
                                                                             %false: the next time that this analysis is run, previous data will be overwritten
             addParameter(p,'collateFun','');                        %allow user to specify a function that knows how to collate their data
@@ -766,6 +766,18 @@ classdef slurm < handle
                     remoteDataFile = [];                
             end
 
+            %make collateFun a string by using " instead of ', in case its
+            %a function handle. This is a workaround to make sbatch able to
+            %handle this additional input
+            if isa(p.Results.collateFun,'function_handle')
+                collateFun = strcat('"',char(p.Results.collateFun),'"');
+            elseif ischar(p.Results.collateFun) || isempty(p.Results.collateFun)
+                collateFun = p.Results.collateFun;
+            else
+                error('If you provide a function for collating your results, then it either needs to be a string or a function handle')
+            end
+                
+            
             %check if folder and data still exist
             if ~isempty(remoteDataFile)
                 if o.exist(targetJobFolder,'dir')
@@ -834,7 +846,7 @@ classdef slurm < handle
                             folderIdx = strfind(tempFinalFolder,'/');
                             startIdx = 1;
                             subFolderNames = cell(1,numel(folderIdx)-1);
-                            for folderCntr = 1:numel(folderIdx)-1
+                            for folderCntr = 1:numel(folderIdx)
                                 subFolderNames{folderCntr} = tempFinalFolder(startIdx:folderIdx(folderCntr));
                                 startIdx = folderIdx(folderCntr)+1;
                                 appendedFolderName = [appendedFolderName subFolderNames{folderCntr}]; %#ok
@@ -885,7 +897,7 @@ classdef slurm < handle
                 dependency = sprintf('afterany:%s',num2str(jobID));  %execute this after the arrayJob has been succesfully submitted
 
                 %run the collateJob (via sbatch, which will run taskBatchRun)
-                collateJobId  = o.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',p.Results.collateFun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',finalFolderDir,'totalNrTasks',nrInArray},'runOptions',p.Results.runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug); 
+                collateJobId  = o.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',collateFun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',finalFolderDir,'totalNrTasks',nrInArray},'runOptions',p.Results.runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug); 
             end
 
             jobInfo.taskIds = jobID;
@@ -1600,9 +1612,10 @@ classdef slurm < handle
             %decide how tasks should be collated
             if isempty(p.Results.mFile) %the user didn't specify, so the result will be a struct array (result(1:nrInArray).result....)
                     result = preResult;
-            elseif ~isempty(p.Results.mFile) %the user specified a function
-            	%result = feval(str2func(p.Results.mFile),preResult);
-                result = preResult;
+            elseif ~isempty(p.Results.mFile) && strcmpi(p.Results.mFile(1),'"')%the user specified a function
+            	result = feval(str2func(strrep(p.Results.mFile,'"','')),preResult); %remove leading and trailing '"' and then make mFile (collateFun) a function handle again
+            elseif ~isempty(p.Results.mFile)
+                result = feval(p.Results.mFile,preResult);  %in case mFile is already the name of a function
             end
         end
         
