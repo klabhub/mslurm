@@ -1614,9 +1614,8 @@ classdef slurm < handle
                     result = preResult;
             elseif ~isempty(p.Results.mFile) && ~isempty(strfind(p.Results.mFile,'"'))%the user specified a function
                 collateFun = p.Results.mFile;
-                collateFun(strfind(collateFun,'"')) = "'";
                 collateFun = str2func(collateFun);
-            	result = feval(collateFun,preResult); %remove leading and trailing '"' and then make mFile (collateFun) a function handle again
+            	result = collateFun(preResult); %remove leading and trailing '"' and then make mFile (collateFun) a function handle again
             elseif ~isempty(p.Results.mFile)
                 result = feval(p.Results.mFile,preResult);  %in case mFile is already the name of a function
             end
