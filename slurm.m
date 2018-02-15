@@ -771,7 +771,7 @@ classdef slurm < handle
             if isa(p.Results.collateFun,'function_handle')
                 collateFun = char(p.Results.collateFun);
                 collateFun(strfind(collateFun,"'")) = '"';
-            elseif ischar(p.Results.collateFun) || isempty(p.Results.collateFun)
+            elseif ischar(p.Results.collateFun) || isempty(p.Results.collateFun) && ~isa(p.Results.collateFun,'function_handle')
                 collateFun = p.Results.collateFun;
             else
                 error('If you provide a function for collating your results, then it either needs to be a string or a function handle')
@@ -1615,7 +1615,8 @@ classdef slurm < handle
             elseif ~isempty(p.Results.mFile) && ~isempty(strfind(p.Results.mFile,'"'))%the user specified a function
                 collateFun = p.Results.mFile;
                 collateFun(strfind(collateFun,'"')) = "'";
-            	result = feval(str2func(collateFun),preResult); %remove leading and trailing '"' and then make mFile (collateFun) a function handle again
+                collateFun = str2func(collateFun);
+            	result = feval(collateFun,preResult); %remove leading and trailing '"' and then make mFile (collateFun) a function handle again
             elseif ~isempty(p.Results.mFile)
                 result = feval(p.Results.mFile,preResult);  %in case mFile is already the name of a function
             end
