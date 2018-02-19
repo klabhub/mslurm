@@ -1638,7 +1638,7 @@ classdef slurm < handle
 %                 result = feval(p.Results.mFile,preResult);  %in case mFile is already the name of a function
 %             end
             else        %the user specified a function that was translated in to a string of numbers in taskBatch, so now we'll translate it back
-            	collateFun = str2num(p.Results.collateFun);  %#ok           %str2double doesn't work
+            	collateFun = str2num(p.Results.mFile);  %#ok           %str2double doesn't work
                 collateFun = getArrayFromByteStream(uint8(collateFun));
                 
                 if contains(collateFun,'@')  %apparently we are dealing with a string that should be translated to a fucntion(-handle) again
