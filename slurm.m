@@ -656,7 +656,8 @@ classdef slurm < handle
         %In case the user uploads their data a call to taskBatch will look
         %approximately like this:
         %       jobInfo = taskBatch('userFun',data,args,'uniqueOutputName',false,'collateFun','userCollateFun','outputFolder','me_12Mar2018/frequencyAnalysis/','addJobName','merry_frequencyAnalysis','batchOptions',{'time','23:50:00','partition','day-long'});
-        %       (userCollateFun can be a function handle such as userCollateFun = @(x) userFun(x,'action','collate'), to pass additional input to the user's function. 
+        %       userCollateFun can either be a function handle such as userCollateFun = @(x) userFun(x,'action','collate'), to pass additional input to the user's function.
+        %       If no additional input arguments are necessary then collate fun should not be a function handle but just the name of the function to be used for collating results as a string ('collateFunName').
         %
         %In case the user wants to re-use data that was already uploaded to
         %the cluster with a previous job, the only difference will be what
@@ -728,7 +729,7 @@ classdef slurm < handle
           	addParameter(p,'uniqueOutputName',false);                        %will the final collated filename reflect the uniqueID that is automatically generated?
                                                                             %true [default]: the same analysis can be performed multiple times and none will be overwritten
                                                                             %false: the next time that this analysis is run, previous data will be overwritten
-            addParameter(p,'collateFun','');                        %allow user to specify a function that knows how to collate their data
+            addParameter(p,'collateFun','');                                %allow user to specify a function that knows how to collate their data
             addParameter(p,'outputFolder',[],@ischar);                      %an outputFolder(with subfolders) to allow the user to keep their analysis organized and distinguishable in their sibdo-folder
           	addParameter(p,'addJobName',[],@ischar);                        %additional info that will be part of the jobName on the cluster
             addParameter(p,'from',7);                                       %if data is a jobID or job(Group)Name, then specify how many days ago to original dataset was submitted
@@ -764,16 +765,25 @@ classdef slurm < handle
                     remoteDataFile = [];                
             end
 
-            %replace "'" with '"' in collate fun. 
-            %This is a workaround to make sbatch able to handle this additional input
-            if isa(p.Results.collateFun,'function_handle')
-                collateFun = char(p.Results.collateFun);
-                collateFun(strfind(collateFun,"'")) = '"';
-            elseif ischar(p.Results.collateFun) || isempty(p.Results.collateFun) && ~isa(p.Results.collateFun,'function_handle')
-                collateFun = p.Results.collateFun;
+%             %replace "'" with '"' in collate fun. 
+%             %This is a workaround to make sbatch able to handle this additional input
+%             if isa(p.Results.collateFun,'function_handle')
+%                 collateFun = char(p.Results.collateFun);
+%                 collateFun(strfind(collateFun,"'")) = '"';
+%             elseif ischar(p.Results.collateFun) || isempty(p.Results.collateFun) && ~isa(p.Results.collateFun,'function_handle')
+%                 collateFun = p.Results.collateFun;
+%             else
+%                 error('If you provide a function for collating your results, then it either needs to be a string or a function handle')
+%             end
+
+            %deal with different ways to specify a collateFunction
+            if ~isempty(p.Results.collateFun)
+            	collateFun = getByteStreamFromArray(char(p.Results.collateFun));
+                collateFun = num2str(collateFun);
             else
-                error('If you provide a function for collating your results, then it either needs to be a string or a function handle')
+                collateFun = [];
             end
+                
                 
             
             %check if folder and data still exist
@@ -1610,23 +1620,33 @@ classdef slurm < handle
             %decide how tasks should be collated
             if isempty(p.Results.mFile) %the user didn't specify, so the result will be a struct array (result(1:nrInArray).result....)
                     result = preResult;
-            elseif ~isempty(p.Results.mFile) && ~isempty(strfind(p.Results.mFile,','))%a comma shoudl be a good indicator that the user specified additional inputs
-                collateFun = p.Results.mFile;
-                %for some reason quotation marks get removed, so lets
-                %re-introduce them before and after commas (unfortunately
-                %this seems tob e necessary in a pretty stupid way since
-                %nothign else seems to work)
-                	collateFun = insertBefore(collateFun,',',"'");
-                    collateFun = insertAfter(collateFun,',',"'");
-                   	collateFun(length(collateFun):length(collateFun)+1) = insertBefore(collateFun(end),')',"'");
-                   	collateFun = strrep(collateFun,"x'",'x');
-                  	collateFun = char(collateFun);
-                 	collateFun = str2func(collateFun);
-             
-            	result = collateFun(preResult); %remove leading and trailing '"' and then make mFile (collateFun) a function handle again
-            elseif ~isempty(p.Results.mFile)
-                result = feval(p.Results.mFile,preResult);  %in case mFile is already the name of a function
-            end
+%             elseif ~isempty(p.Results.mFile) && ~isempty(strfind(p.Results.mFile,','))%a comma shoudl be a good indicator that the user specified additional inputs
+%                 collateFun = p.Results.mFile;
+%                 %for some reason quotation marks get removed, so lets
+%                 %re-introduce them before and after commas (unfortunately
+%                 %this seems tob e necessary in a pretty stupid way since
+%                 %nothign else seems to work)
+%                 	collateFun = insertBefore(collateFun,',',"'");
+%                     collateFun = insertAfter(collateFun,',',"'");
+%                    	collateFun(length(collateFun):length(collateFun)+1) = insertBefore(collateFun(end),')',"'");
+%                    	collateFun = strrep(collateFun,"x'",'x');
+%                   	collateFun = char(collateFun);
+%                  	collateFun = str2func(collateFun);
+%              
+%             	result = collateFun(preResult); %remove leading and trailing '"' and then make mFile (collateFun) a function handle again
+%             elseif ~isempty(p.Results.mFile)
+%                 result = feval(p.Results.mFile,preResult);  %in case mFile is already the name of a function
+%             end
+            else        %the user specified a function that was translated in to a string of numbers in taskBatch, so now we'll translate it back
+            	collateFun = str2num(p.Results.collateFun);
+                collateFun = getArrayFromByteStream(uint8(collateFun));
+                
+                if findstr(collateFun,'@')  %apparently we are dealing with a string that should be translated to a fucntion(-handle) again
+                   collateFun = str2func(collateFun);
+                end
+                
+                result = feval(collateFun,preResult);
+
         end
         
         function fileInFileOutRun(jobID,taskNr,varargin) %#ok<INUSL>
