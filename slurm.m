@@ -656,9 +656,7 @@ classdef slurm < handle
         %In case the user uploads their data a call to taskBatch will look
         %approximately like this:
         %       jobInfo = taskBatch('userFun',data,args,'uniqueOutputName',false,'collateFun','userCollateFun','outputFolder','me_12Mar2018/frequencyAnalysis/','addJobName','merry_frequencyAnalysis','batchOptions',{'time','23:50:00','partition','day-long'});
-        %       (userCollateFun can be a function handle such as userCollateFun = @(x) userFun(x,'action','collate), to pass
-        %       additional input to the user's function. 
-        %   IMPORTANT: userCollateFun MUST be a string. Hint: userCollateFun = func2str(userCollateFun);
+        %       (userCollateFun can be a function handle such as userCollateFun = @(x) userFun(x,'action','collate'), to pass additional input to the user's function. 
         %
         %In case the user wants to re-use data that was already uploaded to
         %the cluster with a previous job, the only difference will be what
