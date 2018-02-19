@@ -1638,16 +1638,18 @@ classdef slurm < handle
 %                 result = feval(p.Results.mFile,preResult);  %in case mFile is already the name of a function
 %             end
             else        %the user specified a function that was translated in to a string of numbers in taskBatch, so now we'll translate it back
-            	collateFun = str2num(p.Results.collateFun);
+            	collateFun = str2num(p.Results.collateFun);  %#ok           %str2double doesn't work
                 collateFun = getArrayFromByteStream(uint8(collateFun));
                 
-                if findstr(collateFun,'@')  %apparently we are dealing with a string that should be translated to a fucntion(-handle) again
+                if contains(collateFun,'@')  %apparently we are dealing with a string that should be translated to a fucntion(-handle) again
                    collateFun = str2func(collateFun);
                 end
                 
                 result = feval(collateFun,preResult);
 
+            end
         end
+        
         
         function fileInFileOutRun(jobID,taskNr,varargin) %#ok<INUSL>
             % This function runs on the cluster in response to a call to slurm.fileInFileOut on the client.
