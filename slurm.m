@@ -651,13 +651,14 @@ classdef slurm < handle
         %Users can either upload a dataset via this function to process
         %their data via their function 'fun' or they can provide a jobID
         %from a previous job or a jobName of a previous job to re-use data
-        %that was uploaded previously.
+        %that was uploaded with that previous job (or attempt).
         %
         %In case the user uploads their data a call to taskBatch will look
         %approximately like this:
         %       jobInfo = taskBatch('userFun',data,args,'uniqueOutputName',false,'collateFun','userCollateFun','outputFolder','me_12Mar2018/frequencyAnalysis/','addJobName','merry_frequencyAnalysis','batchOptions',{'time','23:50:00','partition','day-long'});
         %       userCollateFun can either be a function handle such as userCollateFun = @(x) userFun(x,'action','collate'), to pass additional input to the user's function.
-        %       If no additional input arguments are necessary then collate fun should not be a function handle but just the name of the function to be used for collating results as a string ('collateFunName').
+        %       If no additional input arguments are necessary then collate fun can also just be the name of the function (in quotation marks) to be used for collating results ('collateFunName').
+        %       If collateFun is empty then the result will be a struct array in the form of result(1:nrTasks).result...
         %
         %In case the user wants to re-use data that was already uploaded to
         %the cluster with a previous job, the only difference will be what
@@ -667,6 +668,9 @@ classdef slurm < handle
         %       Or a jobName
         %           jobInfo =
         %           taskBatch('userFun','testCoherence_me_12Mar2018_frequencyAnalysis_180206_025611',args,...)
+        %
+        % If the result of the call to taskBatch should stay unique, the user can set 'uniqueOutputName' to true so that a subfolder in
+        % the form of \yymmdd_hhmmss\ will be generated and the result will be transferred to that folder.
         %
         % AS Feb-2018
         
@@ -765,17 +769,6 @@ classdef slurm < handle
                     remoteDataFile = [];                
             end
 
-%             %replace "'" with '"' in collate fun. 
-%             %This is a workaround to make sbatch able to handle this additional input
-%             if isa(p.Results.collateFun,'function_handle')
-%                 collateFun = char(p.Results.collateFun);
-%                 collateFun(strfind(collateFun,"'")) = '"';
-%             elseif ischar(p.Results.collateFun) || isempty(p.Results.collateFun) && ~isa(p.Results.collateFun,'function_handle')
-%                 collateFun = p.Results.collateFun;
-%             else
-%                 error('If you provide a function for collating your results, then it either needs to be a string or a function handle')
-%             end
-
             %deal with different ways to specify a collateFunction
             if ~isempty(p.Results.collateFun)
             	collateFun = getByteStreamFromArray(char(p.Results.collateFun));
@@ -783,9 +776,7 @@ classdef slurm < handle
             else
                 collateFun = [];
             end
-                
-                
-            
+                  
             %check if folder and data still exist
             if ~isempty(remoteDataFile)
                 if o.exist(targetJobFolder,'dir')
@@ -1494,7 +1485,7 @@ classdef slurm < handle
         end
         
         
-        function taskBatchRun(jobID,taskNr,varargin) %#ok<INUSL>
+        function taskBatchRun(jobID,taskNr,varargin) %#ok
             % This function is a modified version of fevalRun and runs on the cluster in response to 
             % a call to slurm.taskBatch on the client.
             % It is not meant to be called directly. See slurm.taskBatch.
@@ -1585,9 +1576,8 @@ classdef slurm < handle
         function result = taskBatchCollate(jobDir,varargin)
         %function result = taskBatchCollate(jobDir,varargin)
         %
-        %collate results from calling taskBatch, either by combining them 
-        %into a struct-array, 
-        %or by using a function that the user specifically made to collate those results (see taskBatch),
+        %collate results from calling taskBatch, either by combining them into a struct-array, 
+        %or by using a function that the user specified for collating their results (see taskBatch).
 
   
           	p = inputParser;
@@ -1620,24 +1610,7 @@ classdef slurm < handle
             %decide how tasks should be collated
             if isempty(p.Results.mFile) %the user didn't specify, so the result will be a struct array (result(1:nrInArray).result....)
                     result = preResult;
-%             elseif ~isempty(p.Results.mFile) && ~isempty(strfind(p.Results.mFile,','))%a comma shoudl be a good indicator that the user specified additional inputs
-%                 collateFun = p.Results.mFile;
-%                 %for some reason quotation marks get removed, so lets
-%                 %re-introduce them before and after commas (unfortunately
-%                 %this seems tob e necessary in a pretty stupid way since
-%                 %nothign else seems to work)
-%                 	collateFun = insertBefore(collateFun,',',"'");
-%                     collateFun = insertAfter(collateFun,',',"'");
-%                    	collateFun(length(collateFun):length(collateFun)+1) = insertBefore(collateFun(end),')',"'");
-%                    	collateFun = strrep(collateFun,"x'",'x');
-%                   	collateFun = char(collateFun);
-%                  	collateFun = str2func(collateFun);
-%              
-%             	result = collateFun(preResult); %remove leading and trailing '"' and then make mFile (collateFun) a function handle again
-%             elseif ~isempty(p.Results.mFile)
-%                 result = feval(p.Results.mFile,preResult);  %in case mFile is already the name of a function
-%             end
-            else        %the user specified a function that was translated in to a string of numbers in taskBatch, so now we'll translate it back
+            else        %the user did specify a function that was translated in to a string of numbers in taskBatch, so now we'll translate it back
             	collateFun = str2num(p.Results.mFile);  %#ok           %str2double doesn't work
                 collateFun = getArrayFromByteStream(uint8(collateFun));
                 
