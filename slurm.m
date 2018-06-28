@@ -59,6 +59,7 @@ classdef slurm < handle
     
     properties (SetAccess=protected, GetAccess=public, Transient)
         ssh@struct;             % An SSH2 structure
+        maxArraySize;
     end
     
     %% Get/set methods for dependent properties
@@ -70,7 +71,7 @@ classdef slurm < handle
             v = length(o.jobs);
         end
         function v=get.isConnected(o)
-            v = ~isempty(o.ssh.connection);
+            v = ~isempty(o.ssh) && ~isempty(o.ssh.connection);
         end
         
         function state = get.failState(o)
@@ -249,6 +250,8 @@ classdef slurm < handle
                 mkdir(o.localStorage);
             end
             %o.ssh.autoreconnect = true; % Seems to make connection slower?
+            result = o.command('scontrol show config | sed -n ''/^MaxArraySize/s/.*= *//p''');
+            o.maxArraySize = str2double(result{1});
         end
         
         function results = smap(o,options)
@@ -1216,9 +1219,14 @@ classdef slurm < handle
             p.parse(varargin{:});
             
             %% Construct the file name
+             
             [tf,ix] = ismember(jobId,{o.jobs.JobID});
             if any(tf)
                 if strcmpi(p.Results.type,'SH')
+                    if any(jobId=='_')
+                        fprintf(2,'Sorry. slurm does not store comments for an array job.  \n We cannot determine which batch file started this array job.\n');
+                        return
+                    end
                     filename = slurm.decodeComment(o.jobs(ix).Comment,'sbatch');
                     if length(filename)~=1 || isempty(filename{1})
                         error('The comment field should contain the batch file...');
