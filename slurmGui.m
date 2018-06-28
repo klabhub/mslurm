@@ -199,7 +199,7 @@ else
     nrJobs = 0;
 end
 handles.current.selection = [];
-set(handles.subLabel,'string',['Group: ' num2str(nrJobs) ' jobs']);
+set(handles.subLabel,'string',['Group: ' num2str(nrJobs) ' jobs - ' num2str(sum(strcmpi('Completed',{jobs.State}))) ' completed. ' num2str(sum(strcmpi('Running',{jobs.State}))) ' running, and ' num2str(sum(strcmpi('Pending',{jobs.State}))) ' pending.']);
 guidata(handles.figure1,handles);
 set(handles.figure1,'Pointer','arrow');
 drawnow
