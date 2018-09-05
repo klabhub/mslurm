@@ -194,12 +194,13 @@ if any(group>0)
     data = {subs{:};stateStrings{:};jobs.ExitCode;date{:};submit{:};elapsed{:};totalTime{:};jobs.JobID}';
     data = flipud(data);
     set(handles.sub,'Data',data)
+    set(handles.subLabel,'string',['Group: ' num2str(nrJobs) ' jobs - ' num2str(sum(strcmpi('Completed',{jobs.State}))) ' completed. ' num2str(sum(strcmpi('Running',{jobs.State}))) ' running, and ' num2str(sum(strcmpi('Pending',{jobs.State}))) ' pending.']);
 else
     set(handles.sub,'Data',{})
+    set(handles.subLabel,'string','About nothing');
     nrJobs = 0;
 end
 handles.current.selection = [];
-set(handles.subLabel,'string',['Group: ' num2str(nrJobs) ' jobs - ' num2str(sum(strcmpi('Completed',{jobs.State}))) ' completed. ' num2str(sum(strcmpi('Running',{jobs.State}))) ' running, and ' num2str(sum(strcmpi('Pending',{jobs.State}))) ' pending.']);
 guidata(handles.figure1,handles);
 set(handles.figure1,'Pointer','arrow');
 drawnow
@@ -279,11 +280,34 @@ if any(group>0)
             end
         case 'c'
             canBeCancelled = ismember({jobs.State},{'RUNNING','PENDING'});
-            jobs = jobs(canBeCancelled);
-            nrJobs = length(jobs);
-            answer = questdlg(['Do you want to cancel ' num2str(nrJobs) ' jobs?'],'Please Confirm','Yes');
+            jobs = jobs(canBeCancelled);            
+            jobIDs = {jobs.JobID};  % Store all in a cell
+            % Match with something like JobID_[From-To], which is the
+            % format used for array jobs
+            match = regexp(jobIDs,'(?<jobID>\d+)_\[(?<from>\d+)-(?<to>\d+)\]','names');
+            nrInArray = 0;
+            nrArrayJobs=0;
+            out = [];
+                for i=1:numel(match)
+                    if ~isempty(match{i})
+                        jobIDs{i} = match{i}.jobID; % Replace with actual jobID to cancel the entire array of jobs.
+                        if i<numel(match)
+                            % By canceling the parent array job all
+                            % children jobs will be canceled automatically. We remove
+                            % them from the list that is sent to scancel
+                            out = [out i+find(strncmpi([jobIDs{i} '_'],jobIDs((i+1):end),numel(jobIDs{i})+1))];                             %#ok<AGROW>
+                        end
+                        nrArrayJobs = nrArrayJobs +1;
+                        nrInArray = nrInArray + (str2double(match{i}.to)-str2double(match{i}.from)+1);
+                    end
+                end       
+            jobIDs(out) = [];
+            nrJobs = length(jobIDs);            
+            answer = questdlg(sprintf('Do you want to cancel %d jobs (including %d array jobs with %d sub-jobs?',nrJobs,nrArrayJobs,nrInArray),'Please Confirm','Yes');
             if strcmpi(answer,'yes')
-                handles.slurm.cancel('jobId',{jobs.JobID});
+               
+                % Tell slurm to cancel all.
+                handles.slurm.cancel('jobId',jobIDs);
             end
             refresh(handles);
         otherwise

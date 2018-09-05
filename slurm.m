@@ -166,10 +166,16 @@ classdef slurm < handle
             end
         end
         
-        function results = command(o,cmd)
+        function [results,err] = command(o,cmd)
             % Execute an arbitrary UNIX command on the cluster.
             if ~isempty(o.ssh)
-                [o.ssh,results] = ssh2_command(o.ssh,cmd);
+                USESSHERR = false; % If you have the klab SSH fork it returns err messages for debugging. Otherwise keep this as false.
+                if USESSHERR
+                    [o.ssh,results,err] = ssh2_command(o.ssh,cmd);
+                else
+                    [o.ssh,results] = ssh2_command(o.ssh,cmd);
+                    err= 'unknonwn error';
+                end
             else
                 warning('Not connected...')
                 results = {''};
@@ -243,6 +249,8 @@ classdef slurm < handle
                 error(['The specified SSH key file does not exist: ' o.keyfile]);
             end
             o.ssh = ssh2_config_publickey(o.host,o.user,o.keyfile,' ');
+            o.ssh.command_ignore_stderr = false;
+            
             if ~o.exist(o.remoteStorage,'dir')
                 result = o.command(['mkdir '  o.remoteStorage]); %#ok<NASGU>
             end
@@ -1084,12 +1092,12 @@ classdef slurm < handle
                     o.put(fullfile(o.localStorage,batchFile),o.remoteStorage);
                 end
                 % Start the sbatch
-                result = o.command(sprintf('cd %s ;sbatch %s/%s',o.remoteStorage,o.remoteStorage,batchFile));
+                [result,err] = o.command(sprintf('cd %s ;sbatch %s/%s',o.remoteStorage,o.remoteStorage,batchFile));
                 jobId = str2double(regexp(result{1},'\d+','match'));
-                if isempty(jobId) || isnan(jobId)
-                    warning(['Failed to submit ' jobName ' (Msg=' result{1} ')']);
+                if isempty(jobId) || isnan(jobId)                    
+                   warning(['Failed to submit ' jobName ' (Msg=' result{1} ', Err: ' err{1} ' )']);
                 else
-                    warning(['Successfully submitted ' jobName ' (JobID=' num2str(jobId) ')']);
+                   warning(['Successfully submitted ' jobName ' (JobID=' num2str(jobId) ')']);
                 end
             end
         end
@@ -1148,8 +1156,13 @@ classdef slurm < handle
                 else
                     jobIx = find(ismember({o.jobs.JobID},p.Results.jobId));
                 end
-                list = {o.jobs(jobIx).JobName};
-                
+                jobIDs = {o.jobs(jobIx).JobID}; 
+                isArray = cellfun(@(x) (any(x=='_')),jobIDs);
+                if any(isArray)
+                    fprintf(2,'Sorry. array jobs cannot be retried. Please resubmit. \n');                    
+                end
+                jobIx(isArray) = [];
+                list = {o.jobs(jobIx).JobName};                
                 if ~p.Results.list
                     alreadyRetried = {};
                     for j=jobIx
@@ -1309,13 +1322,13 @@ classdef slurm < handle
             o.from  = p.Results.starttime;
             o.to = endTime;
             
-            if ~isempty(strfind(upper(p.Results.format),'SUBMIT'))
+            if ~isempty(strfind(upper(p.Results.format),'SUBMIT')) %#ok<STREMP>
                 format = p.Results.format;
             else
                 format = cat(2,p.Results.format,',Submit');
             end
             
-            if isempty(strfind(upper(format),'JOBID'))
+            if isempty(strfind(upper(format),'JOBID')) %#ok<STREMP>
                 format = cat(2,format,',jobId');
             end
             if ~isempty(p.Results.user)
@@ -1339,7 +1352,27 @@ classdef slurm < handle
                     % Remove the jobs that seem to be part of the jobs that I
                     % start (they have jobIDs with .0 or .batch at the end)
                     stay = cellfun(@isempty,regexp({data.JobID},'\.0\>')) & cellfun(@isempty,regexp({data.JobID},'\.batch\>')) ;
+                    steps = data(~stay);
                     data = data(stay);
+                    jobID={data.JobID};
+                    % Sometimes the job can be completed without errors,
+                    % but one of the steps that belong to it can fail. (We
+                    % had jobs were Matlab was not even started due to some
+                    % major node failure). Here we push that fail state to
+                    % the parent job that is kept after removing the steps.
+                    % This makes it easier to spot such errors in the slurm
+                    % gui, for  instance.
+                    for s=1:numel(steps)
+                            if strcmpi(steps(s).State,'FAILED')
+                                dotIx =strfind(steps(s).JobID,'.');
+                                parentID = steps(s).JobID(1:dotIx-1);
+                                parentIx = strcmp(parentID,jobID);
+                                if any(parentIx)
+                                    data(parentIx).State = 'FAILED';
+                                end
+                            end
+                    end
+                    
                 end
             else
                 %warning(['No sacct information was found for ' jobIdStr '(command = ' cmd ')']);
