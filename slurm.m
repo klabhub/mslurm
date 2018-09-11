@@ -1235,11 +1235,7 @@ classdef slurm < handle
              
             [tf,ix] = ismember(jobId,{o.jobs.JobID});
             if any(tf)
-                if strcmpi(p.Results.type,'SH')
-                    if any(jobId=='_')
-                        fprintf(2,'Sorry. slurm does not store comments for an array job.  \n We cannot determine which batch file started this array job.\n');
-                        return
-                    end
+                if strcmpi(p.Results.type,'SH')                   
                     filename = slurm.decodeComment(o.jobs(ix).Comment,'sbatch');
                     if length(filename)~=1 || isempty(filename{1})
                         error('The comment field should contain the batch file...');
