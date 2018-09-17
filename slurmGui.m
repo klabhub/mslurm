@@ -106,7 +106,7 @@ drawnow;
 
 %if handles.slurm.
 %% Collect from SLURM and update display
-handles.slurm.sacct('format','jobId,State,ExitCode,jobName,Comment,submit,eligible,end,elapsed'); % Update from Slrum
+handles.slurm.sacct('format','jobId,State,ExitCode,jobName,Comment,submit,elapsed,end'); % Update from Slrum
 if handles.slurm.isConnected
     set(handles.figure1,'Name',['SLURM GUI - Connected to ' handles.slurm.host ' as ' handles.slurm.user]);
 else
@@ -182,23 +182,23 @@ if any(group>0)
     for i=1:nrJobs
         stateStrings{i} = sprintf('<HTML><font color=''%s''>%s</font></HTML>',handles.parms.colors{colors(i)},jobs(i).State);        
     end
-    submit = slurm.matlabTime({jobs.Submit});
-    date =cellstr(datestr(submit,'dd-mmm-yy'));
-    submit = cellstr(datestr(submit,'HH:MM'));
-    elapsed = {jobs.Elapsed};
     endTime = slurm.matlabTime({jobs.End});
-    eligibleTime = slurm.matlabTime({jobs.Eligible});    
-    totalTime = cellstr(datestr(endTime-eligibleTime,'HH:MM:SS'));
-    out = endTime==0 | eligibleTime==0;
-    [totalTime{out}] = deal('0');
-    data = {subs{:};stateStrings{:};jobs.ExitCode;date{:};submit{:};elapsed{:};totalTime{:};jobs.JobID}';
+    submitTime = slurm.matlabTime({jobs.Submit});
+ 
+    totalTime = cellstr(datestr(endTime-submitTime,'HH:MM:SS'));
+    out = endTime==0 ;
+    [totalTime{out}] = deal('NaN');
+
+    elapsed = cellstr(datestr({jobs.Elapsed},'HH:MM:SS'));
+    date =cellstr(datestr(submitTime,'dd-mmm-yy'));       
+    submitTime = cellstr(datestr(submitTime,'HH:MM'));
+    data = {subs{:};stateStrings{:};jobs.ExitCode;date{:};submitTime{:};elapsed{:};totalTime{:};jobs.JobID}';
     data = flipud(data);
     set(handles.sub,'Data',data)
     set(handles.subLabel,'string',['Group: ' num2str(nrJobs) ' jobs - ' num2str(sum(strcmpi('Completed',{jobs.State}))) ' completed. ' num2str(sum(strcmpi('Running',{jobs.State}))) ' running, and ' num2str(sum(strcmpi('Pending',{jobs.State}))) ' pending.']);
 else
     set(handles.sub,'Data',{})
-    set(handles.subLabel,'string','About nothing');
-    nrJobs = 0;
+    set(handles.subLabel,'string','About nothing');    
 end
 handles.current.selection = [];
 guidata(handles.figure1,handles);
@@ -397,8 +397,11 @@ if ~isempty(handles.current.selection)
             refresh(handles);
         case 't'
             % Technical details
-            frmt = 'AveCPU,AvePages,AveRSS,AveVMSize,cputime,maxRSS,maxVMSize,nodelist';
-            data = handles.slurm.sacct('jobId',str2num(jobId),'format',frmt); %#ok<NASGU,ST2NM>
+            frmt = 'AveCPU,AvePages,AveRSS,AveVMSize,cputime,maxRSS,maxVMSize,nodelist,State';
+            jobId = strsplit(jobId,'_');% In case this is an arry job
+            data = handles.slurm.sacct('jobId',str2double(jobId{1}),'format',frmt) %#ok<NOPRT>
+            assignin('base','data',data)            
+            warning([ num2str(numel(data)) ' technicals details have been assigned to ''data''']);
         case 'g'
             % Retrieve the data procuded by an slurm.feval job
             ix =strcmpi(jobId,{handles.slurm.jobs.JobID});
@@ -417,16 +420,21 @@ end
 
 
 function sub_CreateFcn(hObject, eventdata, handles)
-set(hObject,'TooltipString',strcat(['<html> This GUI shows the accounting log of a SLURM HPC Cluster. <BR> <HR>  Start by selecting a date (or a range of dates). <BR> '], ...
-                             ['This will contact SLURM and show the jobs currently in the account log. <BR>  The refresh button updates this information (by contacting SLURM again) <BR>  <HR> '],...
-                            ['The panel on the left shows groups of jobs that belong together. <BR>  This relies on a convention for job-naming used by the @slurm class. <BR>'],...
-                            ['The panel on the right displays jobs in the selected group that ran <BR> on the cluster in the selected date range. Click on the headers to sort the jobs.<BR>'],...
-                            ['<HR> Color is used to indicate job state:  <br> <font color=00ff00>Completed Successfully</font> <br> <font color=ddaa00>Running now</font> <br>'],...
-                            ['<font color=0000ee>Failed previously but ok now.</font> <br> <font color=ee0000>Failed</font> <br> <font color=ee00ee>Failed more than 10 times</font> '],...
-                            ['<br> <br> The color of a group indicates the state of the worst job in the group. <BR> Any group with green or blue status therefore completed successfully (eventually). <HR> '],...
-                            ['Use keys to control jobs: <br> <b>o</b> opens a file showing Matlab command line output <br> <b>e</b> opens a file showing cluster and Matlab errors <br> '],...
-                            ['<b>r</b> retries selected jobs (or all failed jobs when a group is selected) <br> <b>c</b> cancels selected jobs (or all running jobs when a group is selected)<br> '],...
-                            ['<br> <b>g</b> retrieves the results of slurm.feval jobs (and assigns them to the ''data'' variable in the base workspace.br> '],...
-                            ['<br> <b>m</b> opens a file in the editor that shows the current usage of the cluster (smap) '],...
-                            ['<HR>  BK -March 2015 </html> ']));
+set(hObject,'TooltipString',strcat('<html> This GUI shows the accounting log of a SLURM HPC Cluster. <BR> <HR>  Start by selecting a date (or a range of dates). <BR> ', ...
+                             'This will contact SLURM and show the jobs currently in the account log. <BR>  The refresh button updates this information (by contacting SLURM again) <BR>  <HR> ',...
+                            'The panel on the left shows groups of jobs that belong together. <BR>  This relies on a convention for job-naming used by the @slurm class. <BR>',...
+                            'The panel on the right displays jobs in the selected group that ran <BR> on the cluster in the selected date range. Click on the headers to sort the jobs.<BR>',...
+                            '<HR> Color is used to indicate job state:  <br> <font color=00ff00>Completed Successfully</font> <br> <font color=ddaa00>Running now</font> <br>',...
+                            '<font color=0000ee>Failed previously but ok now.</font> <br> <font color=ee0000>Failed</font> <br> <font color=ee00ee>Failed more than 10 times</font> ',...
+                            '<br> <br> The color of a group indicates the state of the worst job in the group. <BR> Any group with green or blue status therefore completed successfully (eventually). <HR> ',...
+                            'Use keys to control jobs: <br> <b>o</b> opens a file showing Matlab command line output <br> <b>e</b> opens a file showing cluster and Matlab errors <br> ',...
+                            '<b>r</b> retries selected jobs (or all failed jobs when a group is selected) <br> <b>c</b> cancels selected jobs (or all running jobs when a group is selected)<br> ',...
+                            '<br> <b>g</b> retrieves the results of slurm.feval jobs (and assigns them to the ''data'' variable in the base workspace.br> ',...
+                            '<br> <b>m</b> opens a file in the editor that shows the current usage of the cluster (smap) ',...
+                            '<br><b>s</b> opens the sbatch .sh shell file in the editor.',...
+                            '<br><b>t</b> shows technical details about a job.',...                            
+                            '<HR>  BK -March 2015,2018 </html> '));
+                        
+                        
+                        
 end
