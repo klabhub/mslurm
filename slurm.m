@@ -319,7 +319,7 @@ classdef slurm < handle
             p.parse(varargin{:});
             results ={};
             if p.Results.checkSacct
-                [sacctData] = o.sacct('format','jobName'); % Update accounting
+                [sacctData] = o.sacct('format','jobName,State'); % Update accounting
                 state = o.failState; %0 = success, -1 = success after failing, -2 = running, >0= number of attempts.
                 thisJob = strcmpi(tag,{sacctData.JobName});
                 nrRunning = sum(state(thisJob)==-2);
