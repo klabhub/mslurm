@@ -319,7 +319,7 @@ classdef slurm < handle
             p.parse(varargin{:});
             results ={};
             if p.Results.checkSacct
-                [sacctData] = o.sacct('format','jobName'); % Update accounting
+                [sacctData] = o.sacct('format','jobName,State'); % Update accounting
                 state = o.failState; %0 = success, -1 = success after failing, -2 = running, >0= number of attempts.
                 thisJob = strcmpi(tag,{sacctData.JobName});
                 nrRunning = sum(state(thisJob)==-2);
@@ -670,7 +670,7 @@ classdef slurm < handle
             %from a previous job or a jobName of a previous job to re-use data
             %that was uploaded with that previous job (or attempt).
             %
-            %In case the user uploads their data a call to taskBatch will look
+            %In case the user uploads their data, then a call to taskBatch will look
             %approximately like this:
             %       jobInfo = taskBatch('userFun',data,args,'uniqueOutputName',false,'collateFun','userCollateFun','outputFolder','me_12Mar2018/frequencyAnalysis/','addJobName','merry_frequencyAnalysis','batchOptions',{'time','23:50:00','partition','day-long'});
             %       userCollateFun can either be a function handle such as userCollateFun = @(x) userFun(x,'action','collate'), to pass additional input to the user's function.
@@ -756,6 +756,10 @@ classdef slurm < handle
             addParameter(p,'from',7);                                       %if data is a jobID or job(Group)Name, then specify how many days ago to original dataset was submitted
             %default: 7 days ago;
             addParameter(p,'debug',false);
+            
+            %if a task of a whole taskBatch fails, then we don't want to resubmit the whole Batch
+            %this parameter should not be used directly, it should only be used by o.retry
+            addParameter(p,'resubmitTaskNr',false);
             parse(p,varargin{:});
             
             %if tasks has not been provided then this function cannot run
@@ -1158,25 +1162,88 @@ classdef slurm < handle
                 else
                     jobIx = find(ismember({o.jobs.JobID},p.Results.jobId));
                 end
-                jobIDs = {o.jobs(jobIx).JobID}; 
-                isArray = cellfun(@(x) (any(x=='_')),jobIDs);
-                if any(isArray)
+                jobIDs = {o.jobs(jobIx).JobID};
+                %taskBatches and other collate jobs can be retried
+                isTaskBatch =  cellfun(@(x) (any(x=='_')),jobIDs)  & cellfun(@contains,{o.jobs(jobIx).JobName},repmat({'collate'},[1,length(jobIx)])) | cellfun(@contains,{o.jobs(jobIx).JobName},repmat({'taskBatch'},[1,length(jobIx)]));
+                isArray = cellfun(@(x) (any(x=='_')),jobIDs) & ~isTaskBatch;
+                if any(isArray)                          %
                     fprintf(2,'Sorry. array jobs cannot be retried. Please resubmit. \n');                    
                 end
                 jobIx(isArray) = [];
-                list = {o.jobs(jobIx).JobName};                
-                if ~p.Results.list
-                    alreadyRetried = {};
-                    for j=jobIx
-                        batchFile = slurm.decodeComment(o.jobs(j).Comment,'sbatch');
-                        if length(batchFile)~=1 || isempty(batchFile{1})
-                            error('The comment field should contain the batch file...');
-                        else
-                            batchFile = batchFile{1};
+                %taskBatches are a particular case of array Jobs
+                taskBatchJobIx = jobIx(isTaskBatch);
+                jobIx = jobIx(~isTaskBatch);
+                list = {o.jobs(jobIx).JobName};
+                %retry all regular jobs that are not arrayJobs
+                if ~isempty(jobIx)             
+                    if ~p.Results.list
+                        alreadyRetried = {};
+                        for j=jobIx
+                            batchFile = slurm.decodeComment(o.jobs(j).Comment,'sbatch');
+                            if length(batchFile)~=1 || isempty(batchFile{1})
+                                error('The comment field should contain the batch file...');
+                            else
+                                batchFile = batchFile{1};
+                            end
+                            if ~ismember(batchFile,alreadyRetried)
+                                o.sbatch('retryBatchFile',batchFile);
+                                alreadyRetried = cat(2,alreadyRetried,batchFile);
+                            end
                         end
-                        if ~ismember(batchFile,alreadyRetried)
-                            o.sbatch('retryBatchFile',batchFile);
-                            alreadyRetried = cat(2,alreadyRetried,batchFile);
+                    end
+                end
+                %retry all taskBatchJobs and regular collateJobs
+                if any(isTaskBatch)
+                    list = {o.jobs(taskBatchJobIx).JobName};
+                    
+                    %only one taskBatch should be retried at a time
+                    uTaskBatch = unique(list);
+                   	if length(uTaskBatch)>1
+                        fprintf(2,'Sorry, only retry one taskBatch at a time. Please retry separately. \n');                    
+                    else
+
+                        if  contains(list,'-collate')
+                         	batchFile = slurm.decodeComment(o.jobs(taskBatchJobIx(1)).Comment,'sbatch');
+                         	batchFile = batchFile{1};
+                          	o.sbatch('retryBatchFile',batchFile);
+                        else
+                        
+                        
+                            resubmitAnswer = questdlg('What should be resubmitted?', ...
+                            'Resubmission Options', ...
+                            'Complete TaskBatch','Selected Task Nr(s)','Cancel','Cancel');
+
+                            % Handle response
+                            switch resubmitAnswer
+                                case 'Complete TaskBatch'
+                                    batchFile = slurm.decodeComment(o.jobs(taskBatchJobIx(1)).Comment,'sbatch');
+                                    batchFile = batchFile{1};
+                                    o.sbatch('retryBatchFile',batchFile);
+
+                                case 'Selected Task Nr(s)'
+                                    %separate jobID from taskID
+                                    taskIds = {o.jobs(taskBatchJobIx).JobID};
+                                    taskBatchId = taskIds{1}(1:strfind(taskIds{1},'_')-1);
+                                    taskIds = strrep(taskIds,[taskBatchId '_'],'');
+                                    taskIds = cellfun(@str2num,taskIds);
+
+                                    resubJobName = strrep(uTaskBatch{1},'-taskBatch','');
+                                    jobGroupDir = [o.remoteStorage resubJobName];
+                                    remoteDataPath =  [jobGroupDir '/' resubJobName];
+                                    fun = resubJobName(1:strfind(resubJobName,'_')-1);
+                                    userFolderDir = strrep(fullfile(o.headRootDir,['sibdo/' getenv('USERNAME') '/']),'\','/');
+
+                                    %submit every selected task
+                                    for taskCntr = 1:numel(taskIds)
+                                        o.sbatch('jobName',[resubJobName '-reBatch_task_' num2str(taskIds(taskCntr))],'uniqueID','','batchOptions',{'time','23:59:00','partition','day-long'},'mfile','slurm.taskBatchRun','mfileExtraInput',{'dataFile',[remoteDataPath '_data.mat'],'argsFile',[remoteDataPath '_args.mat'],'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',userFolderDir},'runOptions','','nrInArray',1,'taskNr',taskIds(taskCntr),'debug',false);
+                                    end
+
+                                case 'Cancel'
+                                    fprintf(2,'Nothing to submit then. \n');
+                                otherwise
+                                    fprintf(2,'Nothing to submit then. \n');
+
+                            end
                         end
                     end
                 end
