@@ -398,10 +398,10 @@ if ~isempty(handles.current.selection)
         case 't'
             % Technical details
             frmt = 'AveCPU,AvePages,AveRSS,AveVMSize,cputime,maxRSS,maxVMSize,nodelist,State';
-            jobId = strsplit(jobId,'_');% In case this is an arry job
-            data = handles.slurm.sacct('jobId',str2double(jobId{1}),'format',frmt) %#ok<NOPRT>
-            assignin('base','data',data)            
-            warning([ num2str(numel(data)) ' technicals details have been assigned to ''data''']);
+            %jobId = strsplit(jobId,'_');% In case this is an arry job
+            slurmJobDetails = handles.slurm.sacct('jobId',jobId,'format',frmt) %#ok<NOPRT>            
+            assignin('base','slurmJobDetails',slurmJobDetails)            
+            warning([ num2str(numel(slurmJobDetails)) ' technicals details have been assigned to ''slurmJobDetails''']);
         case 'g'
             % Retrieve the data procuded by an slurm.feval job
             ix =strcmpi(jobId,{handles.slurm.jobs.JobID});

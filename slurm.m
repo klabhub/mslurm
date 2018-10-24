@@ -1298,7 +1298,7 @@ classdef slurm < handle
             
             
             p = inputParser;
-            p.addParameter('jobId',NaN,@isnumeric);
+            p.addParameter('jobId',NaN,@(x) isnumeric(x) || iscell(x) || ischar(x));
             p.addParameter('user',o.user,@ischar);
             p.addParameter('format','jobId,State,ExitCode,jobName,Comment,submit',@ischar);
             p.addParameter('starttime',o.from,@(x)(ischar(x) || isnumeric(x)));
@@ -1308,9 +1308,14 @@ classdef slurm < handle
             
             if isnan(p.Results.jobId)
                 jobIdStr =  '';
-            else
+            elseif isnumeric(p.Results.jobId)
                 jobIdStr =sprintf('%d,',p.Results.jobId(:));
                 jobIdStr = ['--jobs=' jobIdStr];
+            else
+                if ischar(p.Results.jobId)
+                    jobIds = cellstr(p.Results.jobId);
+                end
+                jobIdStr = sprintf('--jobs=%s ', jobIds{:});
             end
             if isinf(p.Results.endtime)
                 endTime = now+1;
