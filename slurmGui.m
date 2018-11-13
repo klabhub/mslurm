@@ -390,7 +390,7 @@ if ~isempty(handles.current.selection)
         case 'r'
             % Retry job
             handles.slurm.retry('jobId',jobId);
-            refresh(handles);
+            %refresh(handles);
         case 'c'       
             % Cancel job
             handles.slurm.cancel('jobId',jobId);
