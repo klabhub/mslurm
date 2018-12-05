@@ -69,22 +69,6 @@ jModel.setSelectionMode(jModel.SINGLE_INTERVAL_SELECTION);
 hModel = handle(jModel, 'CallbackProperties');
 set(hModel, 'ValueChangedCallback',@(x,y)(slurmGui('dateSelectionCallback',handles.dates,handles.figure1)));
 
-%% Make the table sortable
-obj = findjobj(handles.sub);
-if ~isempty(obj )
-    handles.subJava  = obj.getViewport.getView;
-    handles.subJava.setAutoResizeMode(handles.subJava.AUTO_RESIZE_SUBSEQUENT_COLUMNS);
-    % Now turn the JIDE sorting on
-    handles.subJava.setSortable(true);
-    handles.subJava.setAutoResort(true);
-    handles.subJava.setMultiColumnSortable(true);
-    handles.subJava.setPreserveSelectionsAfterSorting(true);
-    set(handles.subJava,'SelectionBackground',java.awt.Color(0.9,0.9,0.9))
-end
-
-obj  = findjobj(handles.job);
-set(obj.getViewport.getView,'SelectionBackground',java.awt.Color(0.9,0.9,0.9));
-
 guidata(hObject,handles);
 refresh(handles); % Pull fresh inforamtion from SLURM
 end
@@ -370,13 +354,7 @@ function sub_KeyPressFcn(~, eventdata, handles)
 
 if ~isempty(handles.current.selection)
     % Deal with sorted tables
-    jRows = handles.subJava.getSelectedRows;
-    nrRows= numel(jRows);
-    sortedSelection = nan(1,nrRows);
-    for i=1:nrRows
-        sortedSelection(i) = handles.subJava.getActualRowAt(jRows(i))+1;
-    end
-    jobId = char(handles.sub.Data{sortedSelection,end});
+    jobId = char(handles.sub.Data{handles.current.selection(:,1),end});
     switch eventdata.Key
         case 'e'
             % Read error file
