@@ -399,7 +399,7 @@ if ~isempty(handles.current.selection)
             % Technical details
             frmt = 'AveCPU,AvePages,AveRSS,AveVMSize,cputime,maxRSS,maxVMSize,nodelist,State';
             %jobId = strsplit(jobId,'_');% In case this is an arry job
-            slurmJobDetails = handles.slurm.sacct('jobId',jobId,'format',frmt) %#ok<NOPRT>            
+            slurmJobDetails = handles.slurm.sacct('jobId',jobId,'format',frmt,'removeSteps',false) %#ok<NOPRT>            
             assignin('base','slurmJobDetails',slurmJobDetails)            
             warning([ num2str(numel(slurmJobDetails)) ' technicals details have been assigned to ''slurmJobDetails''']);
         case 'g'
