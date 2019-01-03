@@ -1230,7 +1230,7 @@ classdef slurm < handle
 
                                     %submit every selected task
                                     for taskCntr = 1:numel(taskIds)
-                                        o.sbatch('jobName',[resubJobName '-reBatch_task_' num2str(taskIds(taskCntr))],'uniqueID','','batchOptions',{'time','23:59:00','partition','nm3,main','mem','40GB'},'mfile','slurm.taskBatchRun','mfileExtraInput',{'dataFile',[remoteDataPath '_data.mat'],'argsFile',[remoteDataPath '_args.mat'],'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',userFolderDir},'runOptions','','nrInArray',1,'taskNr',taskIds(taskCntr),'debug',false);
+                                        o.sbatch('jobName',[resubJobName '-reBatch_task_' num2str(taskIds(taskCntr))],'uniqueID','','batchOptions',{'time','23:59:00','partition','nm3,main','mem','200GB'},'mfile','slurm.taskBatchRun','mfileExtraInput',{'dataFile',[remoteDataPath '_data.mat'],'argsFile',[remoteDataPath '_args.mat'],'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',userFolderDir},'runOptions','','nrInArray',1,'taskNr',taskIds(taskCntr),'debug',false);
                                     end
 
                                 case 'Cancel'
@@ -1705,23 +1705,23 @@ classdef slurm < handle
             
             if ~isempty(p.Results.dataFile)
                 %preload data and args to pass (slices/subsets) to workers
-                dataMatFile = matfile(p.Results.dataFile); % Matfile object for the data so that we can pass a slice
-                dataMatFileInfo = whos(dataMatFile,'data');
-                argsMatFile = matfile(p.Results.argsFile); % Matfile object for the args so that we can slect slices of of data
+                dataMatFile = matfile(p.Results.dataFile) % Matfile object for the data so that we can pass a slice
+                dataMatFileInfo = whos(dataMatFile,'data')
+                argsMatFile = matfile(p.Results.argsFile) % Matfile object for the args so that we can slect slices of of data
                 
                 %data is a cell array and args is a struct which
                 %	contains the field 'tasks', which is a cell array
                 % 	-> pass a subset of data, and a subset of data in args of whatever has the same size as data.
                 %       Both subsets will be selected based on args.tasks{taskNr}
                 
-                fullArgsFile = argsMatFile.args;
-                argsTemp = rmfield(fullArgsFile,'tasks');
-                subTasks = fullArgsFile.tasks{taskNr};
-                args = argsTemp;
-                args.tasks = subTasks;
+                fullArgsFile = argsMatFile.args
+                argsTemp = rmfield(fullArgsFile,'tasks')
+                subTasks = fullArgsFile.tasks{taskNr}
+                args = argsTemp
+                args.tasks = subTasks
                 
-                uDataIdx = unique(args.tasks);
-                dataSlice.data = cell(dataMatFileInfo.size);
+                uDataIdx = unique(args.tasks)
+                dataSlice.data = cell(dataMatFileInfo.size)
                 for dataColCntr = 1:size(dataSlice.data,2)
                     for uDataCntr = 1:numel(uDataIdx)
                         dataSlice.data{uDataIdx(uDataCntr),dataColCntr} = cell2mat(dataMatFile.data(uDataIdx(uDataCntr),dataColCntr));
