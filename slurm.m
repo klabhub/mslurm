@@ -1686,6 +1686,7 @@ classdef slurm < handle
             % stored. (and later retrieved by slurm.retrieve)
             % 'taskData'  - if an array Job has been submitted then each worker receives a separate slice of data (default)
             %               use '
+            try
             
             p = inputParser;
             addParameter(p,'dataFile','');
@@ -1747,6 +1748,11 @@ classdef slurm < handle
                 
                 %transfer the collated result tot he user's sibdo folder
                 slurm.saveResult('collated.mat',result,p.Results.nodeTempDir,p.Results.userSibdoDir);
+            end
+            
+            catch theCulprit
+                theCulprit
+                theCulprit.stack(1)
             end
         end
         
