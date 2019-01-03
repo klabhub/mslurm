@@ -1703,7 +1703,7 @@ classdef slurm < handle
             %if this is a collate job, then the taskNr will be 0, otherwise
             %it will be the taskNr out of the numbers 1:nrInArray
             
-            if taskNr > 0
+            if isempty(p.Results.dataFile)
                 %preload data and args to pass (slices/subsets) to workers
                 dataMatFile = matfile(p.Results.dataFile); % Matfile object for the data so that we can pass a slice
                 dataMatFileInfo = whos(dataMatFile,'data');
