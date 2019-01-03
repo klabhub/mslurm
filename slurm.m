@@ -917,7 +917,7 @@ classdef slurm < handle
                 dependency = sprintf('afterany:%s',num2str(jobID));  %execute this after the arrayJob has been succesfully submitted
                 
                 %run the collateJob (via sbatch, which will run taskBatchRun)
-                collateJobId  = o.sbatch('jobName',[jobGroupName '-collate-taskBatch'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',collateFun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',finalFolderDir,'totalNrTasks',nrInArray},'runOptions',p.Results.runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug);
+                collateJobId  = o.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',collateFun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',finalFolderDir,'totalNrTasks',nrInArray},'runOptions',p.Results.runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug);
             end
             
             jobInfo.taskIds = jobID;
@@ -1230,7 +1230,7 @@ classdef slurm < handle
 
                                     %submit every selected task
                                     for taskCntr = 1:numel(taskIds)
-                                        o.sbatch('jobName',[resubJobName '-reBatch_task_' num2str(taskIds(taskCntr))],'uniqueID','','batchOptions',{'time','23:59:00','partition','day-long'},'mfile','slurm.taskBatchRun','mfileExtraInput',{'dataFile',[remoteDataPath '_data.mat'],'argsFile',[remoteDataPath '_args.mat'],'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',userFolderDir},'runOptions','','nrInArray',1,'taskNr',taskIds(taskCntr),'debug',false);
+                                        o.sbatch('jobName',[resubJobName '-reBatch_task_' num2str(taskIds(taskCntr))],'uniqueID','','batchOptions',{'time','23:59:00','partition','nm3,main','mem','40GB'},'mfile','slurm.taskBatchRun','mfileExtraInput',{'dataFile',[remoteDataPath '_data.mat'],'argsFile',[remoteDataPath '_args.mat'],'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',userFolderDir},'runOptions','','nrInArray',1,'taskNr',taskIds(taskCntr),'debug',false);
                                     end
 
                                 case 'Cancel'
@@ -1756,6 +1756,7 @@ classdef slurm < handle
             %collate results from calling taskBatch, either by combining them into a struct-array,
             %or by using a function that the user specified for collating their results (see taskBatch).
             
+            try
             
             p = inputParser;
             addParameter(p,'mFile','');
@@ -1797,6 +1798,10 @@ classdef slurm < handle
                 
                 result = feval(collateFun,preResult);
                 
+            end
+            
+            catch theCulprit
+                result = theCulprit;
             end
         end
         
