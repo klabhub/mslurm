@@ -1698,6 +1698,8 @@ classdef slurm < handle
             addParameter(p,'userSibdoDir','');
             parse(p,varargin{:});
             
+            p.Results
+            
             %if this is a collate job, then the taskNr will be 0, otherwise
             %it will be the taskNr out of the numbers 1:nrInArray
             
