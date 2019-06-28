@@ -1249,7 +1249,7 @@ classdef slurm < handle
                     list = {o.jobs(arrayJobIx).JobName};                    
                     for j=arrayJobIx
                         thisJobID = o.jobs(j).JobID;
-                        tmp = split(thisJobID,'_');
+                        tmp = strsplit(thisJobID,'_');
                         %arrayJobID = tmp{1};
                         elementInArray = tmp{2};
                         batchFile = slurm.decodeComment(o.jobs(j).Comment,'sbatch');                        
@@ -1261,7 +1261,7 @@ classdef slurm < handle
                         % Make a copy 
                             locFullFile = logFile(o,thisJobID,'type','sh');
                             [pth,locFile] = fileparts(locFullFile);
-                            newFile = split(locFile,'-');                            
+                            newFile = strsplit(locFile,'-');                            
                             newBatchFile = [newFile{1} '-R' elementInArray '.sh'];
                             srcFid =fopen(locFullFile,'r');
                             trgFid =fopen(fullfile(pth,newBatchFile),'w');   
@@ -1273,8 +1273,8 @@ classdef slurm < handle
                                 elseif contains(line,'#SBATCH --output') || contains(line,'#SBATCH --error')
                                     line = strrep(line,'%A_%a.out','%A.out');
                                 elseif contains(line,'#SBATCH --job-name')
-                                    tmp = split(line,'=');
-                                    tmp = split(tmp{2},'-');
+                                    tmp = strsplit(line,'=');
+                                    tmp = strsplit(tmp{2},'-');
                                     line = ['#SBATCH --job-name=' tmp{1} '-R' elementInArray];
                                 elseif contains(line,'#SBATCH --comment')
                                     line = ['#SBATCH --comment=sbatch:' newBatchFile];
