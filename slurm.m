@@ -998,6 +998,7 @@ classdef slurm < handle
             p.addParameter('retryBatchFile','',@ischar);            
             p.addParameter('uniqueID','',@ischar); % Use 'auto' to generate
             p.addParameter('taskNr',0,@isnumeric);
+            p.addParameter('startupDirectory','',@ischar);% Matlab will startup in this directory (-sd command line argument)
             p.parse(varargin{:});
             
             if isempty(p.Results.retryBatchFile)
@@ -1015,11 +1016,17 @@ classdef slurm < handle
                         end
                         extraIn = cat(2,extraIn,',''', p.Results.mfileExtraInput{i},''',',strValue);
                     end
+                    
+                    if ~isempty(p.Results.startupDirectory)
+                        sd = ['-sd '  p.Results.startupDirectory];
+                    else
+                        sd = '';
+                    end
                     if p.Results.nrInArray>=1
-                        runStr = 'matlab -nodisplay -nodesktop -r "try;cd ''%s'';%s($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID %s);catch;lasterr,exit(1);end;exit(0);"';
+                        runStr = ['matlab  ' sd ' -nodisplay -nodesktop -r "try;cd ''%s'';%s($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID %s);catch;lasterr,exit(1);end;exit(0);"'];
                         run = sprintf(runStr,o.remoteStorage,p.Results.mfile,extraIn);
                     else
-                        runStr = 'matlab -nodisplay -nodesktop -r "try;cd ''%s''; %s($SLURM_JOB_ID,%d %s);catch;lasterr,exit(1);end;exit(0);"';
+                        runStr = ['matlab ' sd ' -nodisplay -nodesktop -r "try;cd ''%s''; %s($SLURM_JOB_ID,%d %s);catch;lasterr,exit(1);end;exit(0);"'];
                         run = sprintf(runStr,o.remoteStorage,p.Results.mfile,p.Results.taskNr,extraIn);
                     end
                 elseif ~isempty(p.Results.command)
