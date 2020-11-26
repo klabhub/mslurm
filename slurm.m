@@ -1566,6 +1566,7 @@ classdef slurm < handle
             p = inputParser;
             p.addParameter('jobId',NaN,@(x) isnumeric(x) || iscell(x) || ischar(x));
             p.addParameter('user',o.user,@ischar);
+            p.addParameter('units','G',@(x)(strcmp(x,'G') | strcmp(x,'K')));
             p.addParameter('format','jobId,State,ExitCode,jobName,Comment,submit',@ischar);
             p.addParameter('starttime',o.from,@(x)(ischar(x) || isnumeric(x)));
             p.addParameter('endtime',o.to,@(x)(ischar(x) || isnumeric(x)));
@@ -1611,7 +1612,7 @@ classdef slurm < handle
             % zoom in on a specific set of days. Currently favoring showing
             % more, rather than less.
             %cmd  = ['sacct  --parsable2 --format=' format '  ' jobIdStr userCmd ' --starttime=' datestr(p.Results.starttime,'yyyy-mm-ddTHH:MM:SS') ' --endtime=' datestr(endTime,'yyyy-mm-ddTHH:MM:SS')];
-            cmd  = ['sacct  --parsable2 --format=' format '  ' jobIdStr userCmd ' --starttime=' datestr(p.Results.starttime,'yyyy-mm-ddTHH:MM:SS') ];
+            cmd  = ['sacct  --parsable2 --format=' format '  ' jobIdStr userCmd ' --starttime=' datestr(p.Results.starttime,'yyyy-mm-ddTHH:MM:SS') ' --units=' p.Results.units];
             results = o.command(cmd);
             if length(results)>1
                 fields = strsplit(results{1},'|');
