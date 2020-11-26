@@ -106,7 +106,7 @@ drawnow;
 
 %if handles.slurm.
 %% Collect from SLURM and update display
-handles.slurm.sacct('format','jobId,State,ExitCode,jobName,Comment,submit,elapsed,end'); % Update from Slrum
+handles.slurm.sacct('format','jobId,State,ExitCode,jobName,Comment,submit,elapsed,NodeList,end'); % Update from Slrum
 if handles.slurm.isConnected
     set(handles.figure1,'Name',['SLURM GUI - Connected to ' handles.slurm.host ' as ' handles.slurm.user]);
 else
@@ -192,7 +192,7 @@ if any(group>0)
     elapsed = cellstr(datestr({jobs.Elapsed},'HH:MM:SS'));
     date =cellstr(datestr(submitTime,'dd-mmm-yy'));       
     submitTime = cellstr(datestr(submitTime,'HH:MM'));
-    data = {subs{:};stateStrings{:};jobs.ExitCode;date{:};submitTime{:};elapsed{:};totalTime{:};jobs.JobID}';
+    data = {subs{:};stateStrings{:};jobs.ExitCode;date{:};submitTime{:};elapsed{:};totalTime{:};jobs.JobID;jobs.NodeList}';
     data = flipud(data);
     set(handles.sub,'Data',data)
     set(handles.subLabel,'string',['Group: ' num2str(nrJobs) ' jobs - ' num2str(sum(strcmpi('Completed',{jobs.State}))) ' completed. ' num2str(sum(strcmpi('Running',{jobs.State}))) ' running, and ' num2str(sum(strcmpi('Pending',{jobs.State}))) ' pending.']);
