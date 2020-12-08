@@ -106,7 +106,7 @@ drawnow;
 
 %if handles.slurm.
 %% Collect from SLURM and update display
-handles.slurm.sacct('format','jobId,State,ExitCode,jobName,Comment,submit,elapsed,end'); % Update from Slrum
+handles.slurm.sacct('format','jobId,State,ExitCode,jobName,Comment,submit,elapsed,NodeList,end'); % Update from Slrum
 if handles.slurm.isConnected
     set(handles.figure1,'Name',['SLURM GUI - Connected to ' handles.slurm.host ' as ' handles.slurm.user]);
 else
@@ -192,7 +192,7 @@ if any(group>0)
     elapsed = cellstr(datestr({jobs.Elapsed},'HH:MM:SS'));
     date =cellstr(datestr(submitTime,'dd-mmm-yy'));       
     submitTime = cellstr(datestr(submitTime,'HH:MM'));
-    data = {subs{:};stateStrings{:};jobs.ExitCode;date{:};submitTime{:};elapsed{:};totalTime{:};jobs.JobID}';
+    data = {subs{:};stateStrings{:};jobs.ExitCode;date{:};submitTime{:};elapsed{:};totalTime{:};jobs.JobID;jobs.NodeList}';
     data = flipud(data);
     set(handles.sub,'Data',data)
     set(handles.subLabel,'string',['Group: ' num2str(nrJobs) ' jobs - ' num2str(sum(strcmpi('Completed',{jobs.State}))) ' completed. ' num2str(sum(strcmpi('Running',{jobs.State}))) ' running, and ' num2str(sum(strcmpi('Pending',{jobs.State}))) ' pending.']);
@@ -376,7 +376,7 @@ if ~isempty(handles.current.selection)
     for i=1:nrRows
         sortedSelection(i) = handles.subJava.getActualRowAt(jRows(i))+1;
     end
-    jobId = char(handles.sub.Data{sortedSelection,end});
+    jobId = char(handles.sub.Data{sortedSelection,end-1});
     switch eventdata.Key
         case 'e'
             % Read error file
@@ -397,7 +397,7 @@ if ~isempty(handles.current.selection)
             refresh(handles);
         case 't'
             % Technical details
-            frmt = 'AveCPU,AvePages,AveRSS,AveVMSize,cputime,maxRSS,maxVMSize,nodelist,State';
+            frmt = 'AveCPU,AvePages,AveRSS,AveVMSize,cputime,maxRSS,maxVMSize,ReqMem,NodeList,State';
             %jobId = strsplit(jobId,'_');% In case this is an arry job
             slurmJobDetails = handles.slurm.sacct('jobId',jobId,'format',frmt,'removeSteps',false) %#ok<NOPRT>            
             assignin('base','slurmJobDetails',slurmJobDetails)            
@@ -411,7 +411,10 @@ if ~isempty(handles.current.selection)
             warning([ num2str(numel(data)) ' results of the job have been assigned to ''data''']);
         case 'm'
             % Retrieve an smap and show it in the editor
-            handles.slurm.smap;       
+            handles.slurm.smap;
+        case 'f'
+             fairShareScore = handles.slurm.command(['sshare --Users ' handles.slurm.user ' --format="FairShare"']);
+             warning(['Your fair share score (user ' handles.slurm.user ') is ' num2str(fairShareScore{end})]);
         otherwise
             % Unkown key, ignore
     end
@@ -432,7 +435,8 @@ set(hObject,'TooltipString',strcat('<html> This GUI shows the accounting log of 
                             '<br> <b>g</b> retrieves the results of slurm.feval jobs (and assigns them to the ''data'' variable in the base workspace.br> ',...
                             '<br> <b>m</b> opens a file in the editor that shows the current usage of the cluster (smap) ',...
                             '<br><b>s</b> opens the sbatch .sh shell file in the editor.',...
-                            '<br><b>t</b> shows technical details about a job.',...                            
+                            '<br><b>t</b> shows technical details about a job.',...       
+                            '<br><b>f</b> shows your fair share score.',...   
                             '<HR>  BK -March 2015,2018 </html> '));
                         
                         

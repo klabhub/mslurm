@@ -755,6 +755,7 @@ classdef slurm < handle
             addParameter(p,'addJobName',[],@ischar);                        %additional info that will be part of the jobName on the cluster
             addParameter(p,'from',7);                                       %if data is a jobID or job(Group)Name, then specify how many days ago to original dataset was submitted
             %default: 7 days ago;
+            addParameter(p,'startupDirectory','',@ischar);% Matlab will startup in this directory (-sd command line argument)
             addParameter(p,'debug',false);
             
             %if a task of a whole taskBatch fails, then we don't want to resubmit the whole Batch
@@ -909,7 +910,7 @@ classdef slurm < handle
             end
             
             %run all tasks as an arrayJob
-            jobID = o.sbatch('jobName',[jobGroupName '-taskBatch'] ,'uniqueID','','batchOptions',p.Results.batchOptions,'mfile','slurm.taskBatchRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',userFolderDir},'runOptions',p.Results.runOptions,'nrInArray',nrInArray,'debug',p.Results.debug);
+            jobID = o.sbatch('jobName',[jobGroupName '-taskBatch'] ,'uniqueID','','batchOptions',p.Results.batchOptions,'mfile','slurm.taskBatchRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',userFolderDir},'runOptions',p.Results.runOptions,'nrInArray',nrInArray,'debug',p.Results.debug,'startupDirectory',p.Results.startupDirectory);
             
             
             %start a collate job
@@ -917,7 +918,7 @@ classdef slurm < handle
                 dependency = sprintf('afterany:%s',num2str(jobID));  %execute this after the arrayJob has been succesfully submitted
                 
                 %run the collateJob (via sbatch, which will run taskBatchRun)
-                collateJobId  = o.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',collateFun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',finalFolderDir,'totalNrTasks',nrInArray},'runOptions',p.Results.runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug);
+                collateJobId  = o.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',collateFun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',finalFolderDir,'totalNrTasks',nrInArray},'runOptions',p.Results.runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug,'startupDirectory',p.Results.startupDirectory);
             end
             
             jobInfo.taskIds = jobID;
@@ -1168,11 +1169,19 @@ classdef slurm < handle
                 end
                 jobIDs = {o.jobs(jobIx).JobID};
                 
-                % Three kinds of jobs, with different retry needs
+                % Four kinds of jobs, with different retry needs
                 isArray = cellfun(@(x) (any(x=='_')),jobIDs);
                 isTaskBatch =    isArray & contains({o.jobs(jobIx).JobName},'taskBatch');
                 isRegularArray = isArray & ~isTaskBatch;                
                 isRegularJob =~(isTaskBatch | isRegularArray);
+                isTaskBatchCollate = (contains({o.jobs(jobIx-1).JobName},'taskBatch') & contains({o.jobs(jobIx).JobName},'-collate')) | contains({o.jobs(jobIx).JobName},'-tbRCollate');
+                %
+                if isTaskBatchCollate
+                    isTaskBatch = 1;
+                    isRegularArray = 0;
+                    isRegularJob = 0;
+                end
+                    
                                
                 %% Retry regular jobs 
                 if any(isRegularJob)
@@ -1204,13 +1213,94 @@ classdef slurm < handle
                         fprintf(2,'Sorry, only retry one taskBatch at a time. Please retry separately. \n');                    
                     else
 
-                        if  contains(list,'-collate')
-                         	batchFile = slurm.decodeComment(o.jobs(taskBatchJobIx(1)).Comment,'sbatch');
-                         	batchFile = batchFile{1};
-                          	o.sbatch('retryBatchFile',batchFile);
+                        if isTaskBatchCollate
+                            resubmitAnswer = questdlg('Resubmit AS IS, or change Imputs?', ...
+                            'Resubmission Options', ...
+                            'Resubmit','Change Inputs','Cancel','Cancel');
+                        
+                            if strcmpi(resubmitAnswer,'Change Inputs')
+                                elementInArray = 1;
+                                locFullFile = logFile(o,jobIDs{1},'type','sh');
+                                [pth,locFile] = fileparts(locFullFile);
+                                newFile = strsplit(locFile,'-');                            
+                                newBatchFile = [newFile{1} '-tbRCollate.sh'];
+                                srcFid =fopen(locFullFile,'r');
+                                trgFid =fopen(fullfile(pth,newBatchFile),'w');   
+                                while (true)
+                                    line = fgetl(srcFid);
+                                    if line==-1;break;end
+                                    if contains(line,'#SBATCH --array')                                    
+                                        continue;%skip
+                                    elseif contains(line,'#SBATCH --output') || contains(line,'#SBATCH --error')
+                                        line = strrep(line,'%A_%a.out','%A.out');
+                                    elseif contains(line,'#SBATCH --job-name')
+                                        tmp = strsplit(line,'=');
+                                        tmp = strsplit(tmp{2},'-');
+                                        line = ['#SBATCH --job-name=' tmp{1} '-tbRCollate'];
+                                    elseif contains(line,'#SBATCH --comment')
+                                        line = ['#SBATCH --comment=sbatch:' newBatchFile];
+                                    elseif contains(line,'srun  matlab')
+                                        line = strrep(line,'$SLURM_ARRAY_TASK_ID',num2str(elementInArray));                                    
+                                    elseif contains(line,'#SBATCH --time')
+                                     	startInputIdx = strfind(line,'time=')+5;
+                                      %  if strcmpi(resubmitAnswer,'Change Inputs')
+                                            jobParmPrompt = {'wall-time:'};
+                                            dlgtitle = 'Change Wall-Time?';
+                                            dims = [1 35];
+                                            definput = {line(startInputIdx:end)};
+                                            jobParmAnswer = inputdlg(jobParmPrompt,dlgtitle,dims,definput);
+                                            line = ['#SBATCH --time=' jobParmAnswer{1}];
+                                       % else
+                                          %  line = ['#SBATCH --time' line(startInputIdx:end)];
+                                       % end
+                                        
+                                	elseif contains(line,'#SBATCH --mem')
+                                     	startInputIdx = strfind(line,'mem=')+4;
+                                       % if strcmpi(resubmitAnswer,'Change Inputs')
+                                            jobParmPrompt = {'memory (GB)'};
+                                            dlgtitle = 'Change Memory?';
+                                            dims = [1 35];
+                                            definput = {line(startInputIdx:end)};
+                                            jobParmAnswer = inputdlg(jobParmPrompt,dlgtitle,dims,definput);
+                                            line = ['#SBATCH --mem=' jobParmAnswer{1}];
+                                       % else
+                                           % line = '#SBATCH --time=12:0:00';
+                                       % end
+                                        
+                                    elseif contains(line,'#SBATCH --partition')
+                                     	%startInputIdx = strfind(line,'partition=')+10;
+                                        %if strcmpi(resubmitAnswer,'Change Inputs')
+                                            resubmitPartitionAnswer = questdlg('Which Partition to Resubmit to?', ...
+                                            'Partition Options', ...
+                                            'main','nm3','main,nm3','main,nm3');
+                                            line = ['#SBATCH --partition=' resubmitPartitionAnswer];
+                                      %  else
+                                        %    line = ['#SBATCH --partition=' line(startInputIdx:end)];
+                                       % end
+                                    end
+                                        fprintf(trgFid,'%s\n',line);                            
+                                end
+                                fclose(trgFid);
+                                fclose(srcFid);
+
+                                o.put(fullfile(o.localStorage,newBatchFile),o.remoteStorage);
+                                o.sbatch('retryBatchFile',newBatchFile);
+                                
+                            elseif strcmpi(resubmitAnswer,'Resubmit')
+                                
+                                batchFile = slurm.decodeComment(o.jobs(jobIx).Comment,'sbatch');
+                                if length(batchFile)~=1 || isempty(batchFile{1})
+                                    error('The comment field should contain the batch file...');
+                                else
+                                    batchFile = batchFile{1};
+                                end
+                           
+                                o.sbatch('retryBatchFile',batchFile);
+                               
+                             
+                            end
                         else
-                        
-                        
+
                             resubmitAnswer = questdlg('What should be resubmitted?', ...
                             'Resubmission Options', ...
                             'Complete TaskBatch','Selected Task Nr(s)','Cancel','Cancel');
@@ -1229,15 +1319,65 @@ classdef slurm < handle
                                     taskIds = strrep(taskIds,[taskBatchId '_'],'');
                                     taskIds = cellfun(@str2num,taskIds);
 
-                                    resubJobName = strrep(uTaskBatch{1},'-taskBatch','');
-                                    jobGroupDir = [o.remoteStorage resubJobName];
-                                    remoteDataPath =  [jobGroupDir '/' resubJobName];
+                                	resubJobName = strrep(uTaskBatch{1},'-taskBatch','');
+                                   
+                                    jobGroupDir = [o.remoteStorage '/' resubJobName];
+                                    %remoteDataPath =  [jobGroupDir '/' resubJobName];
                                     fun = resubJobName(1:strfind(resubJobName,'_')-1);
                                     userFolderDir = strrep(fullfile(o.headRootDir,['sibdo/' getenv('USERNAME') '/']),'\','/');
+                                    
+                                    
+                                    %recreate the input arguments to sbatch form the original shell file
+                                    originalInputArgsFile = fileread([o.localStorage '\' resubJobName '-taskBatch.sh']);
+                                    originalInputArgsByLine = splitlines(originalInputArgsFile);
+                                    
+                                    %the arguments we want are
+                                    extractArgs = {'--time'; '--mem'; ' -sd '; 'dataFile'; 'argsFile'};
+                                    
+                                    %this assumes that the order of the dataFile and argsFile input arguments will not change in the future
+                                    for extractArgCntr = 1:length(extractArgs)                                       
+                                        whichLine = find(contains(originalInputArgsByLine,extractArgs{extractArgCntr}));
+                                        switch extractArgs{extractArgCntr}
+                                            
+                                            case '--time'
+                                                wallTime = originalInputArgsByLine{whichLine}(strfind(originalInputArgsByLine{whichLine},'=')+1:end);
+                                                
+                                            case '--mem'
+                                                memorySize = originalInputArgsByLine{whichLine}(strfind(originalInputArgsByLine{whichLine},'=')+1:end);
+                                                
+                                            case ' -sd '
+                                                firstIdx = strfind(originalInputArgsByLine{whichLine},extractArgs{extractArgCntr})+5;
+                                                subString = originalInputArgsByLine{whichLine}(firstIdx:end);
+                                                lastIdx = strfind(subString,'-nodisplay')-2;
+                                                startupDirectory = subString(1:lastIdx);
+                                                
+                                            case 'dataFile'
+                                                firstIdx = strfind(originalInputArgsByLine{whichLine},extractArgs{extractArgCntr})+11;
+                                                subString = originalInputArgsByLine{whichLine}(firstIdx:end);
+                                                lastIdx =  strfind(subString,'argsFile')-4;
+                                                dataFile = subString(1:lastIdx);
+                                                
+                                            case 'argsFile'
+                                                firstIdx = strfind(originalInputArgsByLine{whichLine},extractArgs{extractArgCntr})+11;
+                                                subString = originalInputArgsByLine{whichLine}(firstIdx:end);
+                                                lastIdx =  strfind(subString,'mFile')-4;
+                                                argsFile = subString(1:lastIdx);
+                                                
+                                        end
+                                    end
+                                    
+                                    %ask if any value should be changed
+                                    jobParmPrompt = {'memory (GB):','wall-time:'};
+                                    dlgtitle = 'Need to change Job Parameters?';
+                                    dims = [1 50];
+                                    definput = {memorySize,wallTime};
+                                    jobParmAnswer = inputdlg(jobParmPrompt,dlgtitle,dims,definput);
+                                    memorySize = jobParmAnswer{1};
+                                    wallTime = jobParmAnswer{2};
 
                                     %submit every selected task
                                     for taskCntr = 1:numel(taskIds)
-                                        o.sbatch('jobName',[resubJobName '-reBatch_task_' num2str(taskIds(taskCntr))],'uniqueID','','batchOptions',{'time','23:59:00','partition','nm3,main','mem','200GB'},'mfile','slurm.taskBatchRun','mfileExtraInput',{'dataFile',[remoteDataPath '_data.mat'],'argsFile',[remoteDataPath '_args.mat'],'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',userFolderDir},'runOptions','','nrInArray',1,'taskNr',taskIds(taskCntr),'debug',false);
+                                        o.sbatch('jobName',[resubJobName '-reBatch_task_' num2str(taskIds(taskCntr))],'uniqueID','','batchOptions',{'time',wallTime,'partition','nm3,main','mem',memorySize},'mfile','slurm.taskBatchRun','mfileExtraInput',{'dataFile',dataFile,'argsFile',argsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',userFolderDir},'runOptions','','nrInArray',0,'taskNr',taskIds(taskCntr),'debug',false,'startupDirectory',startupDirectory);
                                     end
 
                                 case 'Cancel'
@@ -1426,6 +1566,7 @@ classdef slurm < handle
             p = inputParser;
             p.addParameter('jobId',NaN,@(x) isnumeric(x) || iscell(x) || ischar(x));
             p.addParameter('user',o.user,@ischar);
+            p.addParameter('units','G',@(x)(strcmp(x,'G') | strcmp(x,'K')));
             p.addParameter('format','jobId,State,ExitCode,jobName,Comment,submit',@ischar);
             p.addParameter('starttime',o.from,@(x)(ischar(x) || isnumeric(x)));
             p.addParameter('endtime',o.to,@(x)(ischar(x) || isnumeric(x)));
@@ -1471,7 +1612,7 @@ classdef slurm < handle
             % zoom in on a specific set of days. Currently favoring showing
             % more, rather than less.
             %cmd  = ['sacct  --parsable2 --format=' format '  ' jobIdStr userCmd ' --starttime=' datestr(p.Results.starttime,'yyyy-mm-ddTHH:MM:SS') ' --endtime=' datestr(endTime,'yyyy-mm-ddTHH:MM:SS')];
-            cmd  = ['sacct  --parsable2 --format=' format '  ' jobIdStr userCmd ' --starttime=' datestr(p.Results.starttime,'yyyy-mm-ddTHH:MM:SS') ];
+            cmd  = ['sacct  --parsable2 --format=' format '  ' jobIdStr userCmd ' --starttime=' datestr(p.Results.starttime,'yyyy-mm-ddTHH:MM:SS') ' --units=' p.Results.units];
             results = o.command(cmd);
             if length(results)>1
                 fields = strsplit(results{1},'|');
