@@ -36,11 +36,11 @@
 classdef slurm < handle
     
     properties (SetAccess=public, GetAccess=public)
-        remoteStorage@char  = ''; % Location on HPC Cluster where scripts and logs will be written
-        localStorage@char   = ''; % Location on client where logs and scripts will be written
-        host@char           = ''; % Host Address
-        user@char           = ''; % Remote user name
-        keyfile@char        = ''; % Name of the SSH key file. (full name)
+        remoteStorage       = ''; % Location on HPC Cluster where scripts and logs will be written
+        localStorage        = ''; % Location on client where logs and scripts will be written
+        host                = ''; % Host Address
+        user                = ''; % Remote user name
+        keyfile             = ''; % Name of the SSH key file. (full name)
         from                = now - 1; % Retrieve logs from this time (use datenum format)
         to                  = Inf; % Until this time.
         nodeTempDir         = '';  % The path to a directory on a node that can be used to save data temporarily (e.g. /scratch/)
@@ -58,7 +58,7 @@ classdef slurm < handle
     end
     
     properties (SetAccess=protected, GetAccess=public, Transient)
-        ssh@struct;             % An SSH2 structure
+        ssh;             % An SSH2 structure
         maxArraySize;
     end
     
