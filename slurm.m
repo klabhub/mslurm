@@ -2084,7 +2084,7 @@ classdef slurm < handle
         end
         
         function exit(me)
-            if isnumeric(me) && m==0
+            if isnumeric(me) && me==0
                 % All is well. Exit with code ==0;
                 exit(0);
             else
