@@ -52,6 +52,7 @@ classdef slurm < handle
         nrJobs;                 % Number of jobs currently available in the log (i.e. submitted between .from and .to)
         isConnected;            % Check that we have an open SSH connection to the cluster.
         failState;              % Current state of each of the jobs in the log.
+        fairshare;              % The users fair share score
     end
     properties (SetAccess=protected, GetAccess=public)
         jobs;                    % A structure with the information retrieved from the slurm accounting logs (see the sacct function below)
@@ -67,6 +68,12 @@ classdef slurm < handle
         function v=get.pwd(o)
             v = command(o,'pwd');
         end
+        function v = get.fairshare(o)
+            v = o.command(['sshare --noheader --Users ' o.user ' --format="FairShare"']);    
+            if iscell(v) && numel(v)==1
+                v = str2double(v{1});
+            end
+        end         
         function  v=get.nrJobs(o)
             v = length(o.jobs);
         end
@@ -1494,7 +1501,30 @@ classdef slurm < handle
                 end
             end
         end
-        
+      
+          
+        function [T]=jobsTable(o,expression)
+            
+            % Often jobs belong together in a group. By using convention
+            % jobName =  Job-SubJob, the 'group' (job) and its elements (subjob)
+            % can be determined from the jobName. This is used by slurmGui to make the
+            % interaction with the logs less cluttered.
+            if nargin<2
+                % Default format  GROUP-SUB
+                expression = '(?<group>[\w_-]*)-(?<sub>[\w\d\.]*$)';
+            end                        
+            if o.nrJobs >0
+                jobNames = {o.jobs.JobName};
+                match = regexp(jobNames,expression,'names');
+                noGroupMatch = cellfun(@isempty,match);
+                [match{noGroupMatch}]= deal(struct('group','Not Grouped','sub',''));
+                match = cat(1,match{:});
+                T=struct2table(o.jobs);
+                T= addvars(T,{match.group}','NewVariableNames','Group');
+            else
+                T = table; % Empty table
+            end
+        end
         
         function localName = logFile(o,jobId,varargin )
             % Retrieve a log file from the cluster. This can be the redirected
