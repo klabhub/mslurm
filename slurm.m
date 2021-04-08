@@ -635,6 +635,7 @@ classdef slurm < handle
             p.addParameter('debug',false);
             p.addParameter('copy',false);
             p.addParameter('startupDirectory','');
+            p.addParameter('addpath','');
             p.KeepUnmatched = true;
             p.parse(varargin{:});
             
@@ -667,6 +668,7 @@ classdef slurm < handle
             opts.runOptions= p.Results.runOptions;
             opts.nrInArray = nrDataJobs;
             opts.startupDirectory = p.Results.startupDirectory;
+            opts.addpath = p.Results.addpath;
             opts.taskNr =1;
             o.sbatch(opts);
             
@@ -1011,6 +1013,7 @@ classdef slurm < handle
             p.addParameter('uniqueID','',@ischar); % Use 'auto' to generate
             p.addParameter('taskNr',0,@isnumeric);
             p.addParameter('startupDirectory','',@ischar);% Matlab will startup in this directory (-sd command line argument)
+            p.addParameter('addpath','',@ischar); % Add these folders to the Matlab path by calling addpath(x)
             p.parse(varargin{:});
             
             if isempty(p.Results.retryBatchFile)
@@ -1034,12 +1037,18 @@ classdef slurm < handle
                     else
                         sd = '';
                     end
-                    if p.Results.nrInArray>=1
-                        runStr = ['matlab  ' sd ' -nodisplay -nodesktop -r "try;cd ''%s'';%s($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID %s);catch me;slurm.exit(me);end;slurm.exit(0);"'];
-                        run = sprintf(runStr,o.remoteStorage,p.Results.mfile,extraIn);
+                    
+                    if ~isempty(p.Results.addpath)
+                        addPathStr = sprintf('addpath(''%s'')',p.Results.addpath);
                     else
-                        runStr = ['matlab ' sd ' -nodisplay -nodesktop -r "try;cd ''%s''; %s($SLURM_JOB_ID,%d %s);catch me;slurm.exit(me);end;slurm.exit(0);"'];
-                        run = sprintf(runStr,o.remoteStorage,p.Results.mfile,p.Results.taskNr,extraIn);
+                        addPathStr = '';
+                    end
+                    if p.Results.nrInArray>=1
+                        runStr = ['matlab  ' sd ' -nodisplay -nodesktop -r "try;%s;cd ''%s'';%s($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID %s);catch me;slurm.exit(me);end;slurm.exit(0);"'];
+                        run = sprintf(runStr,addPathStr,o.remoteStorage,p.Results.mfile,extraIn);
+                    else
+                        runStr = ['matlab ' sd ' -nodisplay -nodesktop -r "try;%s;cd ''%s''; %s($SLURM_JOB_ID,%d %s);catch me;slurm.exit(me);end;slurm.exit(0);"'];
+                        run = sprintf(runStr,addPathStr,o.remoteStorage,p.Results.mfile,p.Results.taskNr,extraIn);
                     end
                 elseif ~isempty(p.Results.command)
                     % The user knows what to do. Run this command as is with srun.
@@ -2099,7 +2108,16 @@ classdef slurm < handle
                     % error code. of 1
                     code = 1;
                 end
-                me.message  % Write to command line to show in log.
+                % Output callstack to help debugging
+                fprintf('*************Message***************\n')
+                fprintf('Line %d in %s generated error message:\n',me.stack(1).line,me.stack(1).name);
+                fprintf('-\n %s \n-\n',me.message );                                 
+                fprintf('***************Call Stack************\n')                
+                for i=1:numel(me.stack)
+                    fprintf('Line %d in %s (%s)\n',me.stack(i).line,me.stack(i).name,me.stack(i).file);
+                end
+                fprintf('************************************\n')
+                % Now exit                
                 exit(code);
             end
         end
