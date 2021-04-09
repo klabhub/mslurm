@@ -381,13 +381,13 @@ if ~isempty(handles.current.selection)
     switch eventdata.Key
         case 'e'
             % Read error file
-            handles.slurm.logFile(jobId,'type','err')
+            handles.slurm.getFile(jobId,'type','err')
         case 'o'
             % Read output file
-            handles.slurm.logFile(jobId,'type','out')
+            handles.slurm.getFile(jobId,'type','out')
          case 's'
              % Read bash script 
-             handles.slurm.logFile(jobId,'type','sh')
+             handles.slurm.getFile(jobId,'type','sh')
         case 'r'
             % Retry job
             handles.slurm.retry('jobId',jobId);
