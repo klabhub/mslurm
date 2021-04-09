@@ -1556,7 +1556,7 @@ classdef slurm < handle
                 noGroupMatch = cellfun(@isempty,match);
                 [match{noGroupMatch}]= deal(struct('group','Not Grouped','sub',''));
                 match = cat(1,match{:});
-                T=struct2table(o.jobs);               
+                T=struct2table(o.jobs,'AsArray',true);               
                 T= addvars(T,{match.group}',o.failStateName', 'NewVariableNames',{'Group','FailState'});
             else
                 T = table; % Empty table
