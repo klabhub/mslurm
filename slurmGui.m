@@ -41,6 +41,7 @@ function slurmGui_OpeningFcn(hObject, ~, handles, varargin)
 % handles    structure with handles and user data (see GUIDATA)
 % varargin   command line arguments to slurmGui (see VARARGIN)
 
+fprintf(2,'This gui is Guide based and uses undocumented Java components that may or may not stop working soon. \n If you have Matlab R2020a or later, please use slurmApp instead\n');
 
 %% Store some useful information.
 handles.output = hObject;

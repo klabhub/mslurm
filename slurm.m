@@ -52,7 +52,7 @@ classdef slurm < handle
         nrJobs;                 % Number of jobs currently available in the log (i.e. submitted between .from and .to)
         isConnected;            % Check that we have an open SSH connection to the cluster.
         failState;              % Current state of each of the jobs in the log.
-        fairshare;              % The users fair share score
+        failStateName;
     end
     properties (SetAccess=protected, GetAccess=public)
         jobs;                    % A structure with the information retrieved from the slurm accounting logs (see the sacct function below)
@@ -68,12 +68,7 @@ classdef slurm < handle
         function v=get.pwd(o)
             v = command(o,'pwd');
         end
-        function v = get.fairshare(o)
-            v = o.command(['sshare --noheader --Users ' o.user ' --format="FairShare"']);    
-            if iscell(v) && numel(v)==1
-                v = str2double(v{1});
-            end
-        end         
+        
         function  v=get.nrJobs(o)
             v = length(o.jobs);
         end
@@ -121,6 +116,20 @@ classdef slurm < handle
                 end
             end
         end
+        
+        
+        function stateNames = get.failStateName(o)
+            state = o.failState;
+            
+            % Map to a name
+            stateNames = cell(size(state));
+            [stateNames{state==0}] = deal('SUCCESS'); % (completed success)
+            [stateNames{state==1}] = deal('RETRIED');  % Blue Failed but retried
+            [stateNames{state==-2}] =deal('RUNNING');
+            [stateNames{state>0 & state<=10}] =deal('FAILED');
+            [stateNames{state>10}] =deal('FREQFAIL');
+        end
+    
     end
     
     %% Public Methods
@@ -144,6 +153,18 @@ classdef slurm < handle
             % Close the SSH connection to the cluster
             if ~isempty(o.ssh)
                 o.ssh = ssh2_close(o.ssh);
+            end
+        end
+        
+        function v = fairshare(o,usr)
+            if nargin <2
+                usr = o.user;
+            end
+            v = o.command(['sshare --noheader --Users ' usr ' --format="FairShare"']);
+            if iscell(v) && numel(v)==1
+                v = str2double(v{1});
+            else
+                v = NaN;
             end
         end
         
@@ -269,7 +290,7 @@ classdef slurm < handle
             o.maxArraySize = str2double(result{1});
         end
         
-        function results = smap(o,options)
+        function [T,msg] = smap(o,options)
             % Read the current usage status of all nodes on the cluster
             % (using smap). Command line options to smap can be passed as
             % an options string.
@@ -277,21 +298,32 @@ classdef slurm < handle
             % EXAMPLE:
             % o.smap  ; % Show current usage
             % o.smap('-D s')  ; Show a list of partitions
+            %
+            % OUTPUT
+            %  T = table with the smap info
+            % msg = warning message
+            
             
             if nargin <2
                 options ='';
             end
             uid = datestr(now,'FFF');
             filename = ['smap.output.' uid '.txt'];
-            results = o.command([' smap ' options ' -c > ' o.remoteStorage '/' filename]);
+            msg = o.command([' smap ' options ' -c > ' o.remoteStorage '/' filename]);
             try
                 o.ssh = scp_get(o.ssh,filename,o.localStorage,o.remoteStorage);
                 o.command(['rm ' o.remoteStorage '/' filename]);
             catch
-                disp('Failed to perform an smap');
+                msg = 'Failed to perform an smap';
             end
             localFile = fullfile(o.localStorage,filename);
-            edit(localFile);
+            if nargout ==0
+                warning(msg);
+                edit(localFile);
+                
+            else
+                T = readtable(localFile);
+            end
             delete(localFile);
         end
         
@@ -459,7 +491,7 @@ classdef slurm < handle
             if ischar(p.Results.inPath)
                 inPath = repmat({p.Results.inPath},[nrFiles 1]); % % One path per in File.
             elseif numel(p.Results.inPath) == nrFiles
-                inPath = p.Results.inPath(:); 
+                inPath = p.Results.inPath(:);
             else
                 error('The number of inPath does not match the number of inFile');
             end
@@ -470,7 +502,7 @@ classdef slurm < handle
                 [~,f,e] = fileparts(inFile{i});
                 outFile{i} = [f p.Results.outTag e];
             end
-            outPath = p.Results.outPath;     
+            outPath = p.Results.outPath;
             
             
             %% Setup the jobs
@@ -491,7 +523,7 @@ classdef slurm < handle
             
             
             if ~isempty(fieldnames(p.Unmatched))
-                args = p.Unmatched; 
+                args = p.Unmatched;
                 argsFile = [uid '_args.mat'];
                 % Save a local copy of the args
                 localArgsFile = fullfile(o.localStorage,argsFile);
@@ -754,7 +786,7 @@ classdef slurm < handle
             %put data and args into the right format
             if isrow(data) && ~ischar(data)
                 % This is interpreted as a column.
-                data = data';   
+                data = data';
             end
             if isrow(args)
                 args = args';
@@ -1201,7 +1233,12 @@ classdef slurm < handle
                 isTaskBatch =    isArray & contains({o.jobs(jobIx).JobName},'taskBatch');
                 isRegularArray = isArray & ~isTaskBatch;
                 isRegularJob =~(isTaskBatch | isRegularArray);
-                isTaskBatchCollate = (contains({o.jobs(jobIx-1).JobName},'taskBatch') & contains({o.jobs(jobIx).JobName},'-collate')) | contains({o.jobs(jobIx).JobName},'-tbRCollate');
+                % TODO: this depends on the ordering of the jobs.... Seems a risky strategy?
+                if jobIx>1
+                    isTaskBatchCollate = (contains({o.jobs(jobIx-1).JobName},'taskBatch') & contains({o.jobs(jobIx).JobName},'-collate')) | contains({o.jobs(jobIx).JobName},'-tbRCollate');
+                else
+                    isTaskBatchCollate =false;
+                end
                 %
                 if isTaskBatchCollate
                     isTaskBatch = 1;
@@ -1501,8 +1538,8 @@ classdef slurm < handle
                 end
             end
         end
-      
-          
+        
+        
         function [T]=jobsTable(o,expression)
             
             % Often jobs belong together in a group. By using convention
@@ -1512,21 +1549,21 @@ classdef slurm < handle
             if nargin<2
                 % Default format  GROUP-SUB
                 expression = '(?<group>[\w_-]*)-(?<sub>[\w\d\.]*$)';
-            end                        
+            end
             if o.nrJobs >0
                 jobNames = {o.jobs.JobName};
                 match = regexp(jobNames,expression,'names');
                 noGroupMatch = cellfun(@isempty,match);
                 [match{noGroupMatch}]= deal(struct('group','Not Grouped','sub',''));
                 match = cat(1,match{:});
-                T=struct2table(o.jobs);
-                T= addvars(T,{match.group}','NewVariableNames','Group');
+                T=struct2table(o.jobs);               
+                T= addvars(T,{match.group}',o.failStateName', 'NewVariableNames',{'Group','FailState'});
             else
                 T = table; % Empty table
             end
         end
         
-        function localName = logFile(o,jobId,varargin )
+        function [localName,msg] = logFile(o,jobId,varargin )
             % Retrieve a log file from the cluster. This can be the redirected
             % stdout (type =out) or stderr (type=err). (Although currently
             % sbatch writes both out and err to the same .out file so the
@@ -1549,34 +1586,49 @@ classdef slurm < handle
             %% Construct the file name
             
             [tf,ix] = ismember(jobId,{o.jobs.JobID});
+            nrFiles = sum(tf);
             if any(tf)
-                if strcmpi(p.Results.type,'SH')
-                    filename = slurm.decodeComment(o.jobs(ix).Comment,'sbatch');
-                    if length(filename)~=1 || isempty(filename{1})
-                        error('The comment field should contain the batch file...');
+                filename = cell(1,nrFiles);
+                for i=1:nrFiles
+                    if strcmpi(p.Results.type,'SH')
+                        thisFilename = slurm.decodeComment(o.jobs(ix(i)).Comment,'sbatch');
+                        if length(thisFilename)~=1 || isempty(thisFilename{1})
+                            error('The comment field should contain the batch file...');
+                        else
+                            thisFilename = thisFilename{1};
+                        end
                     else
-                        filename = filename{1};
+                        thisFilename =[o.jobs(ix(i)).JobID '.' p.Results.type];
                     end
-                else
-                    filename = [ o.jobs(ix).JobID '.' p.Results.type];
+                    filename{i} = thisFilename;
                 end
             else
                 error(['No matching jobId found (' jobId ')']);
             end
             %% Retrieve it from the cluster if not available local
             localName= fullfile(o.localStorage,filename );
-            if ~exist(localName,'file') || p.Results.forceRemote
-                remoteName= strrep(fullfile(o.remoteStorage,filename ),'\','/');
-                if o.exist(remoteName,'file')
-                    o.ssh = scp_get(o.ssh,filename,o.localStorage,o.remoteStorage);
-                else
-                    warning(['File does not exist: ' remoteName]);
-                    return;
+            msg = cell(1,nrFiles);
+            [msg{:}] = deal('');
+            for i = 1:nrFiles
+                if ~exist(localName{i},'file') || p.Results.forceRemote
+                    remoteName= strrep(fullfile(o.remoteStorage,filename{i}),'\','/');
+                    if o.exist(remoteName,'file')
+                        o.ssh = scp_get(o.ssh,filename{i},o.localStorage,o.remoteStorage);
+                    else
+                        msg{i} = ['File does not exist: ' remoteName];
+                        if nargout <2
+                            warning(msg{i});
+                        end
+                    end
                 end
             end
             if nargout==0
                 %% Open in editor
-                edit(localName);
+                edit(localName{:});
+            elseif nrFiles==1
+                % Return char if possible
+                localName =localName{1};
+                msg  = msg{1};
             end
             
         end
@@ -1618,28 +1670,48 @@ classdef slurm < handle
             p.addParameter('user',o.user,@ischar);
             p.addParameter('units','G',@(x)(strcmp(x,'G') | strcmp(x,'K')));
             p.addParameter('format','jobId,State,ExitCode,jobName,Comment,submit',@ischar);
-            p.addParameter('starttime',o.from,@(x)(ischar(x) || isnumeric(x)));
-            p.addParameter('endtime',o.to,@(x)(ischar(x) || isnumeric(x)));
+            p.addParameter('starttime',o.from,@(x)(ischar(x) || isnumeric(x) ||isdatetime(x)));
+            p.addParameter('endtime',o.to,@(x)(ischar(x) || isnumeric(x) || isdatetime(x)));
             p.addParameter('removeSteps',true,@islogical);
             p.parse(varargin{:});
             
-            if isnan(p.Results.jobId)
-                jobIdStr =  '';
-            elseif isnumeric(p.Results.jobId)
-                jobIdStr =sprintf('%d,',p.Results.jobId(:));
-                jobIdStr = ['--jobs=' jobIdStr];
+            if isnumeric(p.Results.jobId)
+                if isnan(p.Results.jobId)
+                    jobIdStr =  '';
+                else
+                    jobIdStr =sprintf('%d,',p.Results.jobId(:));
+                    jobIdStr = ['--jobs=' jobIdStr];
+                end
             else
                 if ischar(p.Results.jobId)
                     jobIds = cellstr(p.Results.jobId);
+                elseif iscellstr(p.Results.jobId)
+                    jobIds = p.Results.jobId;
                 end
                 jobIdStr = sprintf('--jobs=%s ', jobIds{:});
             end
-            if isinf(p.Results.endtime)
+            
+            if isdatetime(p.Results.endtime)
+                endTime = datenum(p.Results.endtime);
+            else
+                endTime = p.Results.endtime;
+            end
+            
+            if isdatetime(p.Results.starttime)
+                startTime = datenum(p.Results.starttime);
+            else
+                startTime = p.Results.starttime;
+            end
+            
+            
+            if isinf(endTime)
                 endTime = now+1;
             else
-                endTime = max(p.Results.starttime+1,p.Results.endtime);
+                endTime = max(startTime+1,endTime);
             end
-            o.from  = p.Results.starttime;
+            
+            
+            o.from  = startTime;
             o.to = endTime;
             
             if ~isempty(strfind(upper(p.Results.format),'SUBMIT')) %#ok<STREMP>
@@ -1662,7 +1734,7 @@ classdef slurm < handle
             % zoom in on a specific set of days. Currently favoring showing
             % more, rather than less.
             %cmd  = ['sacct  --parsable2 --format=' format '  ' jobIdStr userCmd ' --starttime=' datestr(p.Results.starttime,'yyyy-mm-ddTHH:MM:SS') ' --endtime=' datestr(endTime,'yyyy-mm-ddTHH:MM:SS')];
-            cmd  = ['sacct  --parsable2 --format=' format '  ' jobIdStr userCmd ' --starttime=' datestr(p.Results.starttime,'yyyy-mm-ddTHH:MM:SS') ' --units=' p.Results.units];
+            cmd  = ['sacct  --parsable2 --format=' format '  ' jobIdStr userCmd ' --starttime=' slurm.slurmTime(startTime) ' --units=' p.Results.units];
             results = o.command(cmd);
             if length(results)>1
                 fields = strsplit(results{1},'|');
@@ -1704,12 +1776,16 @@ classdef slurm < handle
                 data =[];
                 elapsed = duration(0,0,0);
                 elapsed.Format = 'h';
-                return
             end
             
+            %Update internal.
             if nargout==0
+                % Sometimes we call sacct to retrieve a different type of
+                % information and then we don't want to update the cached
+                % job inofrmation
                 o.jobs = data;
             end
+            
         end
         
         
@@ -2141,13 +2217,13 @@ classdef slurm < handle
                 % Output callstack to help debugging
                 fprintf('*************Message***************\n')
                 fprintf('Line %d in %s generated error message:\n',me.stack(1).line,me.stack(1).name);
-                fprintf('-\n %s \n-\n',me.message );                                 
-                fprintf('***************Call Stack************\n')                
+                fprintf('-\n %s \n-\n',me.message );
+                fprintf('***************Call Stack************\n')
                 for i=1:numel(me.stack)
                     fprintf('Line %d in %s (%s)\n',me.stack(i).line,me.stack(i).name,me.stack(i).file);
                 end
                 fprintf('************************************\n')
-                % Now exit                
+                % Now exit
                 exit(code);
             end
         end
