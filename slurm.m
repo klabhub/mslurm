@@ -129,7 +129,7 @@ classdef slurm < handle
             [stateNames{state>0 & state<=10}] =deal('FAILED');
             [stateNames{state>10}] =deal('FREQFAIL');
         end
-    
+        
     end
     
     %% Public Methods
@@ -1284,7 +1284,7 @@ classdef slurm < handle
                             
                             if strcmpi(resubmitAnswer,'Change Inputs')
                                 elementInArray = 1;
-                                locFullFile = logFile(o,jobIDs{1},'type','sh');
+                                locFullFile = getFile(o,jobIDs{1},'type','sh');
                                 [pth,locFile] = fileparts(locFullFile);
                                 newFile = strsplit(locFile,'-');
                                 newBatchFile = [newFile{1} '-tbRCollate.sh'];
@@ -1470,7 +1470,7 @@ classdef slurm < handle
                             batchFile = batchFile{1}; %#ok<NASGU>
                         end
                         % Make a copy
-                        locFullFile = logFile(o,thisJobID,'type','sh');
+                        locFullFile = getFile(o,thisJobID,'type','sh');
                         [pth,locFile] = fileparts(locFullFile);
                         newFile = strsplit(locFile,'-');
                         newBatchFile = [newFile{1} '-R' elementInArray '.sh'];
@@ -1556,26 +1556,30 @@ classdef slurm < handle
                 noGroupMatch = cellfun(@isempty,match);
                 [match{noGroupMatch}]= deal(struct('group','Not Grouped','sub',''));
                 match = cat(1,match{:});
-                T=struct2table(o.jobs,'AsArray',true);               
+                T=struct2table(o.jobs,'AsArray',true);
                 T= addvars(T,{match.group}',o.failStateName', 'NewVariableNames',{'Group','FailState'});
             else
                 T = table; % Empty table
             end
         end
         
-        function [localName,msg] = logFile(o,jobId,varargin )
-            % Retrieve a log file from the cluster. This can be the redirected
-            % stdout (type =out) or stderr (type=err). (Although currently
-            % sbatch writes both out and err to the same .out file so the
-            % 'out' logfile has all the information.
-            % Input
+        function [localName,msg] = getFile(o,jobId,varargin )
+            % Retrieve a  file from the cluster. This can be the redirected
+            % stdout (type =out) or stderr (type=err), or the bash shell script (type =sh)
+            % Currently sbatch writes both out and err to the same .out file so the
+            % 'err' file has no information.
+            % INPUT
             % jobId  = jobID
             % 'element' =  element of a job array (ignored for non-array batch
             % jobs).
-            % 'type' = 'out' or 'err'
+            % 'type' = 'out' or 'err' or 'sh'
             % 'forceRemote' = Force reading from remote [true].
             % OUTPUT
-            % File is opened in editor
+            %  localName = The full name of the file on the local/client
+            %  computer. This can be a cell array if multiple files are
+            %  requested (ie. for multiple jobids)
+            % msg = Error messages.
+            %  If the use provides no output argument, the file is opened in the editor
             %
             p =inputParser;
             p.addParameter('element',[],@isnumeric);% Element of array job
@@ -1584,40 +1588,58 @@ classdef slurm < handle
             p.parse(varargin{:});
             
             %% Construct the file name
-            
+            % For running jobs we use scontrol for completed jobs sacct.
+            % (scontrol only works for running jobs, sacct does not have
+            % the comment while the task is running. Strange but true.
+            if ischar(jobId);jobId= {jobId};end
+            nrFiles = numel(jobId);
+            filename = cell(1,nrFiles);
             [tf,ix] = ismember(jobId,{o.jobs.JobID});
-            nrFiles = sum(tf);
-            if any(tf)
-                filename = cell(1,nrFiles);
-                for i=1:nrFiles
-                    if strcmpi(p.Results.type,'SH')
+            if ~all(tf);error('JobIds not known.');end
+            
+            
+            for i=1:nrFiles
+                switch upper(p.Results.type)
+                    case 'SH'
+                        searchStr = 'Command';
                         thisFilename = slurm.decodeComment(o.jobs(ix(i)).Comment,'sbatch');
-                        if length(thisFilename)~=1 || isempty(thisFilename{1})
-                            error('The comment field should contain the batch file...');
-                        else
-                            thisFilename = thisFilename{1};
-                        end
-                    else
-                        thisFilename =[o.jobs(ix(i)).JobID '.' p.Results.type];
-                    end
-                    filename{i} = thisFilename;
+                        if iscell(thisFilename);thisFilename= thisFilename{1};end
+                    case 'OUT'
+                        searchStr ='StdOut';
+                        thisFilename =[o.jobs(ix(i)).JobID '.out'];
+                    case 'ERR'
+                        searchStr = 'StdErr';
+                        thisFilename =[o.jobs(ix(i)).JobID '.err'];
                 end
-            else
-                error(['No matching jobId found (' jobId ')']);
+                
+                if isempty(thisFilename)
+                    % Try scontrol
+                    thisFilename = o.command(['scontrol show job ' jobId{i} ' | awk -F= ''/' searchStr '=/{print $2}''']);
+                    if iscell(thisFilename);thisFilename = thisFilename{1};end
+                    [~,thisFilename,ext] = fileparts(thisFilename); % strip path
+                    thisFilename = [thisFilename ext]; %#ok<AGROW>
+                end
+                
+                filename{i} = thisFilename;
             end
-            %% Retrieve it from the cluster if not available local
-            localName= fullfile(o.localStorage,filename );
+            %% Retrieve it f,rom the cluster if not available local
             msg = cell(1,nrFiles);
             [msg{:}] = deal('');
+            localName = cell(1,nrFiles);
             for i = 1:nrFiles
-                if ~exist(localName{i},'file') || p.Results.forceRemote
-                    remoteName= strrep(fullfile(o.remoteStorage,filename{i}),'\','/');
-                    if o.exist(remoteName,'file')
-                        o.ssh = scp_get(o.ssh,filename{i},o.localStorage,o.remoteStorage);
-                    else
-                        msg{i} = ['File does not exist: ' remoteName];
-                        if nargout <2
-                            warning(msg{i});
+                if isempty(filename{i})
+                    msg{i} = 'Could not determine filename';
+                else
+                    localName{i}= fullfile(o.localStorage,filename{i} );
+                    if ~exist(localName{i},'file') || p.Results.forceRemote
+                        remoteName= strrep(fullfile(o.remoteStorage,filename{i}),'\','/');
+                        if o.exist(remoteName,'file')
+                            o.ssh = scp_get(o.ssh,filename{i},o.localStorage,o.remoteStorage);
+                        else
+                            msg{i} = ['File does not exist: ' remoteName];
+                            if nargout <2
+                                warning(msg{i});
+                            end
                         end
                     end
                 end
