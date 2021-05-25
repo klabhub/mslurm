@@ -161,8 +161,8 @@ classdef slurm < handle
                 usr = o.user;
             end
             v = o.command(['sshare --noheader --Users ' usr ' --format="FairShare"']);
-            if iscell(v) && numel(v)==1
-                v = str2double(v{1});
+            if iscell(v) 
+                v = str2double(v);
             else
                 v = NaN;
             end
@@ -1944,7 +1944,7 @@ classdef slurm < handle
                 %feval and cell stays cell
                 error(['The data in ' p.Results.dataFile ' has the wrong type: ' class(data) ]);
             end
-            
+            pwd
             if ~isempty(p.Results.argsFile)  % args may have extra inputs for the user mfile
                 load(p.Results.argsFile);
                 result = feval(p.Results.mFile,data{:},args); % Pass all cells of the row to the mfile as argument (plus optional args)
