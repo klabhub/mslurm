@@ -1243,40 +1243,27 @@ classdef slurm < handle
                                         line = strrep(line,'$SLURM_ARRAY_TASK_ID',num2str(elementInArray));                                    
                                     elseif contains(line,'#SBATCH --time')
                                      	startInputIdx = strfind(line,'time=')+5;
-                                      %  if strcmpi(resubmitAnswer,'Change Inputs')
                                             jobParmPrompt = {'wall-time:'};
                                             dlgtitle = 'Change Wall-Time?';
                                             dims = [1 35];
                                             definput = {line(startInputIdx:end)};
                                             jobParmAnswer = inputdlg(jobParmPrompt,dlgtitle,dims,definput);
                                             line = ['#SBATCH --time=' jobParmAnswer{1}];
-                                       % else
-                                          %  line = ['#SBATCH --time' line(startInputIdx:end)];
-                                       % end
                                         
                                 	elseif contains(line,'#SBATCH --mem')
                                      	startInputIdx = strfind(line,'mem=')+4;
-                                       % if strcmpi(resubmitAnswer,'Change Inputs')
                                             jobParmPrompt = {'memory (GB)'};
                                             dlgtitle = 'Change Memory?';
                                             dims = [1 35];
                                             definput = {line(startInputIdx:end)};
                                             jobParmAnswer = inputdlg(jobParmPrompt,dlgtitle,dims,definput);
                                             line = ['#SBATCH --mem=' jobParmAnswer{1}];
-                                       % else
-                                           % line = '#SBATCH --time=12:0:00';
-                                       % end
                                         
                                     elseif contains(line,'#SBATCH --partition')
-                                     	%startInputIdx = strfind(line,'partition=')+10;
-                                        %if strcmpi(resubmitAnswer,'Change Inputs')
                                             resubmitPartitionAnswer = questdlg('Which Partition to Resubmit to?', ...
                                             'Partition Options', ...
                                             'main','nm3','main,nm3','main,nm3');
                                             line = ['#SBATCH --partition=' resubmitPartitionAnswer];
-                                      %  else
-                                        %    line = ['#SBATCH --partition=' line(startInputIdx:end)];
-                                       % end
                                     end
                                         fprintf(trgFid,'%s\n',line);                            
                                 end
@@ -1374,10 +1361,20 @@ classdef slurm < handle
                                     jobParmAnswer = inputdlg(jobParmPrompt,dlgtitle,dims,definput);
                                     memorySize = jobParmAnswer{1};
                                     wallTime = jobParmAnswer{2};
-
+                                            
+                                    taskParmPrompt = {'Task Nr(s) (i.e.: 1:10 15:25 30 31)'};
+                                    dlgtitle = 'Which Task(s) should be restarted?';
+                                    dims = [1 50];
+                                    taskIds = sort(taskIds);
+                                    definput = {num2str(taskIds)};
+                                    
+                                   	taskParmAnswer = inputdlg(taskParmPrompt,dlgtitle,dims,definput);
+                                    taskIds = str2num(taskParmAnswer{1}); %#ok -str2double isn't flexible enough
+                                    
                                     %submit every selected task
                                     for taskCntr = 1:numel(taskIds)
                                         o.sbatch('jobName',[resubJobName '-reBatch_task_' num2str(taskIds(taskCntr))],'uniqueID','','batchOptions',{'time',wallTime,'partition','nm3,main','mem',memorySize},'mfile','slurm.taskBatchRun','mfileExtraInput',{'dataFile',dataFile,'argsFile',argsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',userFolderDir},'runOptions','','nrInArray',0,'taskNr',taskIds(taskCntr),'debug',false,'startupDirectory',startupDirectory);
+                                        pause(0.1)
                                     end
 
                                 case 'Cancel'

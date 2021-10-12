@@ -189,7 +189,7 @@ if any(group>0)
     out = endTime==0 ;
     [totalTime{out}] = deal('NaN');
 
-    elapsed = cellstr(datestr({jobs.Elapsed},'HH:MM:SS'));
+    elapsed = cellstr({jobs.Elapsed});
     date =cellstr(datestr(submitTime,'dd-mmm-yy'));       
     submitTime = cellstr(datestr(submitTime,'HH:MM'));
     data = {subs{:};stateStrings{:};jobs.ExitCode;date{:};submitTime{:};elapsed{:};totalTime{:};jobs.JobID;jobs.NodeList}';
