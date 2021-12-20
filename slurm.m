@@ -161,11 +161,8 @@ classdef slurm < handle
                 usr = o.user;
             end
             v = o.command(['sshare --noheader --Users ' usr ' --format="FairShare"']);
-            if iscell(v) && numel(v)==1
-                v = str2double(v{1});
-            else
-                v = NaN;
-            end
+            v= v{1}; % First line is user, second is 'general'?
+            v = str2double(v);            
         end
         
         function gitpull(o,d)
