@@ -41,6 +41,7 @@ function slurmGui_OpeningFcn(hObject, ~, handles, varargin)
 % handles    structure with handles and user data (see GUIDATA)
 % varargin   command line arguments to slurmGui (see VARARGIN)
 
+fprintf(2,'This gui is Guide based and uses undocumented Java components that may or may not stop working soon. \n If you have Matlab R2020a or later, please use slurmApp instead\n');
 
 %% Store some useful information.
 handles.output = hObject;
@@ -380,13 +381,13 @@ if ~isempty(handles.current.selection)
     switch eventdata.Key
         case 'e'
             % Read error file
-            handles.slurm.logFile(jobId,'type','err')
+            handles.slurm.getFile(jobId,'type','err')
         case 'o'
             % Read output file
-            handles.slurm.logFile(jobId,'type','out')
+            handles.slurm.getFile(jobId,'type','out')
          case 's'
              % Read bash script 
-             handles.slurm.logFile(jobId,'type','sh')
+             handles.slurm.getFile(jobId,'type','sh')
         case 'r'
             % Retry job
             handles.slurm.retry('jobId',jobId);

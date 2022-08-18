@@ -52,6 +52,7 @@ classdef slurm < handle
         nrJobs;                 % Number of jobs currently available in the log (i.e. submitted between .from and .to)
         isConnected;            % Check that we have an open SSH connection to the cluster.
         failState;              % Current state of each of the jobs in the log.
+        failStateName;
     end
     properties (SetAccess=protected, GetAccess=public)
         jobs;                    % A structure with the information retrieved from the slurm accounting logs (see the sacct function below)
@@ -67,6 +68,7 @@ classdef slurm < handle
         function v=get.pwd(o)
             v = command(o,'pwd');
         end
+        
         function  v=get.nrJobs(o)
             v = length(o.jobs);
         end
@@ -114,6 +116,20 @@ classdef slurm < handle
                 end
             end
         end
+        
+        
+        function stateNames = get.failStateName(o)
+            state = o.failState;
+            
+            % Map to a name
+            stateNames = cell(size(state));
+            [stateNames{state==0}] = deal('SUCCESS'); % (completed success)
+            [stateNames{state==1}] = deal('RETRIED');  % Blue Failed but retried
+            [stateNames{state==-2}] =deal('RUNNING');
+            [stateNames{state>0 & state<=10}] =deal('FAILED');
+            [stateNames{state>10}] =deal('FREQFAIL');
+        end
+        
     end
     
     %% Public Methods
@@ -140,6 +156,15 @@ classdef slurm < handle
             end
         end
         
+        function v = fairshare(o,usr)
+            if nargin <2
+                usr = o.user;
+            end
+            v = o.command(['sshare --noheader --Users ' usr ' --format="FairShare"']);
+            v= v{1}; % First line is user, second is 'general'?
+            v = str2double(v);            
+        end
+        
         function gitpull(o,d)
             % Convenience function to pull a remote git repo from the
             % origin (typially used to sync local code development with
@@ -149,11 +174,11 @@ classdef slurm < handle
                 warning('*****************************************************************');
                 warning('***The remote cluster does not have git installed... your code will not be pulled.***');
                 warning('*****************************************************************');
-            end            
+            end
             if ischar(d)
                 d= {d};
             end
-            for i=1:numel(d)                
+            for i=1:numel(d)
                 result = o.command(['cd ' d{i} '; git pull origin']);
                 result = unique(result);
                 for j=1:numel(result)
@@ -171,7 +196,7 @@ classdef slurm < handle
             if ~isempty(o.ssh)
                 USESSHERR = false; % If you have the klab SSH fork it returns err messages for debugging. Otherwise keep this as false.
                 if USESSHERR
-                    [o.ssh,results,err] = ssh2_command(o.ssh,cmd);
+                    [o.ssh,results,err] = ssh2_command(o.ssh,cmd); %#ok<UNRCH>
                 else
                     [o.ssh,results] = ssh2_command(o.ssh,cmd);
                     err= 'unknonwn error';
@@ -262,7 +287,7 @@ classdef slurm < handle
             o.maxArraySize = str2double(result{1});
         end
         
-        function results = smap(o,options)
+        function [T,msg] = smap(o,options)
             % Read the current usage status of all nodes on the cluster
             % (using smap). Command line options to smap can be passed as
             % an options string.
@@ -270,21 +295,32 @@ classdef slurm < handle
             % EXAMPLE:
             % o.smap  ; % Show current usage
             % o.smap('-D s')  ; Show a list of partitions
+            %
+            % OUTPUT
+            %  T = table with the smap info
+            % msg = warning message
+            
             
             if nargin <2
                 options ='';
             end
             uid = datestr(now,'FFF');
             filename = ['smap.output.' uid '.txt'];
-            results = o.command([' smap ' options ' -c > ' o.remoteStorage '/' filename]);
+            msg = o.command([' smap ' options ' -c > ' o.remoteStorage '/' filename]);
             try
                 o.ssh = scp_get(o.ssh,filename,o.localStorage,o.remoteStorage);
                 o.command(['rm ' o.remoteStorage '/' filename]);
             catch
-                disp('Failed to perform an smap');
+                msg = 'Failed to perform an smap';
             end
             localFile = fullfile(o.localStorage,filename);
-            edit(localFile);
+            if nargout ==0
+                warning(msg);
+                edit(localFile);
+                
+            else
+                T = readtable(localFile);
+            end
             delete(localFile);
         end
         
@@ -369,7 +405,7 @@ classdef slurm < handle
             nrJobsFound = max(nr); % Yes max...
             results = cell(1,nrJobsFound);
             for i=1:numel(files)
-                load(fullfile(localJobDir,files{i}));
+                load(fullfile(localJobDir,files{i})); %#ok<LOAD>
                 results{nr(i)} = result;
             end
             
@@ -450,9 +486,9 @@ classdef slurm < handle
             
             nrFiles= size(inFile,1);
             if ischar(p.Results.inPath)
-                inPath = repmat({p.Results.inPath},[nrFiles 1]); %#ok<NASGU> % One path per in File.
-            elseif numel(p.Results.inPath) == nrFiles;
-                inPath = p.Results.inPath(:); %#ok<NASGU>
+                inPath = repmat({p.Results.inPath},[nrFiles 1]); % % One path per in File.
+            elseif numel(p.Results.inPath) == nrFiles
+                inPath = p.Results.inPath(:);
             else
                 error('The number of inPath does not match the number of inFile');
             end
@@ -463,7 +499,7 @@ classdef slurm < handle
                 [~,f,e] = fileparts(inFile{i});
                 outFile{i} = [f p.Results.outTag e];
             end
-            outPath = p.Results.outPath;     %#ok<NASGU>
+            outPath = p.Results.outPath;
             
             
             %% Setup the jobs
@@ -484,7 +520,7 @@ classdef slurm < handle
             
             
             if ~isempty(fieldnames(p.Unmatched))
-                args = p.Unmatched; %#ok<NASGU>
+                args = p.Unmatched;
                 argsFile = [uid '_args.mat'];
                 % Save a local copy of the args
                 localArgsFile = fullfile(o.localStorage,argsFile);
@@ -634,11 +670,13 @@ classdef slurm < handle
             p.addParameter('runOptions','');
             p.addParameter('debug',false);
             p.addParameter('copy',false);
+            p.addParameter('startupDirectory','');
+            p.addParameter('addpath','');
             p.KeepUnmatched = true;
             p.parse(varargin{:});
             
             if ~isempty(fieldnames(p.Unmatched))
-                args = p.Unmatched; %#ok<NASGU>
+                args = p.Unmatched;
                 argsFile = [uid '_args.mat'];
                 % Save a local copy of the args
                 localArgsFile = fullfile(o.localStorage,argsFile);
@@ -657,7 +695,18 @@ classdef slurm < handle
             end
             
             %% Start the jobs
-            o.sbatch('jobName',jobName,'uniqueID','auto','batchOptions',p.Results.batchOptions,'mfile','slurm.fevalRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobDir},'debug',p.Results.debug,'runOptions',p.Results.runOptions,'nrInArray',nrDataJobs,'taskNr',1);
+            opts.jobName = jobName;
+            opts.uniqueID = 'auto';
+            opts.batchOptions = p.Results.batchOptions;
+            opts.mfile ='slurm.fevalRun';
+            opts.mfileExtraInput ={'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobDir};
+            opts.debug = p.Results.debug;
+            opts.runOptions= p.Results.runOptions;
+            opts.nrInArray = nrDataJobs;
+            opts.startupDirectory = p.Results.startupDirectory;
+            opts.addpath = p.Results.addpath;
+            opts.taskNr =1;
+            o.sbatch(opts);
             
         end
         
@@ -734,7 +783,7 @@ classdef slurm < handle
             %put data and args into the right format
             if isrow(data) && ~ischar(data)
                 % This is interpreted as a column.
-                data = data';   %#ok
+                data = data';
             end
             if isrow(args)
                 args = args';
@@ -781,12 +830,12 @@ classdef slurm < handle
                     targetJobName = allJobNames{targetJobIDIdx(1)};
                     targetJobFolder = strrep(fullfile(o.remoteStorage,erase(targetJobName,'-taskBatch'),'/'),'\','/');
                     remoteDataFile = [targetJobFolder erase(targetJobName,'-taskBatch') '_data.mat'];
-                    localDataFile = [o.localStorage erase(targetJobName,'-taskBatch') '_data.mat'];
+                    localDataFile = [o.localStorage erase(targetJobName,'-taskBatch') '_data.mat']; %#ok<NASGU>
                 case 'jobName' %if we know the jobName then we basically know the folder already
                     targetJobFolder = strrep(fullfile(o.remoteStorage,erase(data,'-taskBatch'),'/'),'\','/');
                     targetJobName = data;
                     remoteDataFile = [targetJobFolder erase(data,'-taskBatch') '_data.mat'];
-                    localDataFile = [o.localStorage erase(data,'-taskBatch') '_data.mat'];
+                    localDataFile = [o.localStorage erase(data,'-taskBatch') '_data.mat']; %#ok<NASGU>
                 case 'realData'
                     remoteDataFile = [];
             end
@@ -996,10 +1045,11 @@ classdef slurm < handle
             p.addParameter('command','',@ischar);
             p.addParameter('nrInArray',0,@(x) (isnumeric(x) && isscalar(x)));
             p.addParameter('debug',false,@islogical);
-            p.addParameter('retryBatchFile','',@ischar);            
+            p.addParameter('retryBatchFile','',@ischar);
             p.addParameter('uniqueID','',@ischar); % Use 'auto' to generate
             p.addParameter('taskNr',0,@isnumeric);
             p.addParameter('startupDirectory','',@ischar);% Matlab will startup in this directory (-sd command line argument)
+            p.addParameter('addpath','',@ischar); % Add these folders to the Matlab path by calling addpath(x)
             p.parse(varargin{:});
             
             if isempty(p.Results.retryBatchFile)
@@ -1023,12 +1073,18 @@ classdef slurm < handle
                     else
                         sd = '';
                     end
-                    if p.Results.nrInArray>=1
-                        runStr = ['matlab  ' sd ' -nodisplay -nodesktop -r "try;cd ''%s'';%s($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID %s);catch;lasterr,exit(1);end;exit(0);"'];
-                        run = sprintf(runStr,o.remoteStorage,p.Results.mfile,extraIn);
+                    
+                    if ~isempty(p.Results.addpath)
+                        addPathStr = sprintf('addpath(''%s'')',p.Results.addpath);
                     else
-                        runStr = ['matlab ' sd ' -nodisplay -nodesktop -r "try;cd ''%s''; %s($SLURM_JOB_ID,%d %s);catch;lasterr,exit(1);end;exit(0);"'];
-                        run = sprintf(runStr,o.remoteStorage,p.Results.mfile,p.Results.taskNr,extraIn);
+                        addPathStr = '';
+                    end
+                    if p.Results.nrInArray>=1
+                        runStr = ['matlab  ' sd ' -nodisplay -nodesktop -r "try;%s;cd ''%s'';%s($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID %s);catch me;slurm.exit(me);end;slurm.exit(0);"'];
+                        run = sprintf(runStr,addPathStr,o.remoteStorage,p.Results.mfile,extraIn);
+                    else
+                        runStr = ['matlab ' sd ' -nodisplay -nodesktop -r "try;%s;cd ''%s''; %s($SLURM_JOB_ID,%d %s);catch me;slurm.exit(me);end;slurm.exit(0);"'];
+                        run = sprintf(runStr,addPathStr,o.remoteStorage,p.Results.mfile,p.Results.taskNr,extraIn);
                     end
                 elseif ~isempty(p.Results.command)
                     % The user knows what to do. Run this command as is with srun.
@@ -1043,7 +1099,7 @@ classdef slurm < handle
                     % Ensure that array job numbers generated by slurm are
                     % base-1 (default is base zero)
                     batchOptions = cat(2,p.Results.batchOptions,{'array',['1-' num2str(p.Results.nrInArray)]});
-                        outFile = '%A_%a.out';
+                    outFile = '%A_%a.out';
                 else
                     batchOptions = p.Results.batchOptions;
                     outFile = '%A.out';
@@ -1064,8 +1120,8 @@ classdef slurm < handle
                 end
                 batchFile = sprintf('%s%s.sh',jobName,uniqueID);
                 fid  =fopen( fullfile(o.localStorage,batchFile) ,'w'); % no t (unix line endings are needed)
-                fprintf(fid,'#!/bin/bash\n');                
-                batchOptions = cat(2,batchOptions, {'job-name',jobName,'output',outFile,'error',outFile,'comment',slurm.encodeComment('','sbatch',batchFile)});                
+                fprintf(fid,'#!/bin/bash\n');
+                batchOptions = cat(2,batchOptions, {'job-name',jobName,'output',outFile,'error',outFile,'comment',slurm.encodeComment('','sbatch',batchFile)});
                 for opt=1:2:numel(batchOptions)
                     if isempty(batchOptions{opt+1})
                         fprintf(fid,'#SBATCH --%s\n',batchOptions{opt});
@@ -1106,10 +1162,10 @@ classdef slurm < handle
                 % Start the sbatch
                 [result,err] = o.command(sprintf('cd %s ;sbatch %s/%s',o.remoteStorage,o.remoteStorage,batchFile));
                 jobId = str2double(regexp(result{1},'\d+','match'));
-                if isempty(jobId) || isnan(jobId)                    
-                   warning(['Failed to submit ' jobName ' (Msg=' result{1} ', Err: ' err{1} ' )']);
+                if isempty(jobId) || isnan(jobId)
+                    warning(['Failed to submit ' jobName ' (Msg=' result{1} ', Err: ' err{1} ' )']);
                 else
-                   warning(['Successfully submitted ' jobName ' (JobID=' num2str(jobId) ')']);
+                    warning(['Successfully submitted ' jobName ' (JobID=' num2str(jobId) ')']);
                 end
             end
         end
@@ -1172,35 +1228,40 @@ classdef slurm < handle
                 % Four kinds of jobs, with different retry needs
                 isArray = cellfun(@(x) (any(x=='_')),jobIDs);
                 isTaskBatch =    isArray & contains({o.jobs(jobIx).JobName},'taskBatch');
-                isRegularArray = isArray & ~isTaskBatch;                
+                isRegularArray = isArray & ~isTaskBatch;
                 isRegularJob =~(isTaskBatch | isRegularArray);
-                isTaskBatchCollate = (contains({o.jobs(jobIx-1).JobName},'taskBatch') & contains({o.jobs(jobIx).JobName},'-collate')) | contains({o.jobs(jobIx).JobName},'-tbRCollate');
+                % TODO: this depends on the ordering of the jobs.... Seems a risky strategy?
+                if jobIx>1
+                    isTaskBatchCollate = (contains({o.jobs(jobIx-1).JobName},'taskBatch') & contains({o.jobs(jobIx).JobName},'-collate')) | contains({o.jobs(jobIx).JobName},'-tbRCollate');
+                else
+                    isTaskBatchCollate =false;
+                end
                 %
                 if isTaskBatchCollate
                     isTaskBatch = 1;
                     isRegularArray = 0;
                     isRegularJob = 0;
                 end
-                    
-                               
-                %% Retry regular jobs 
+                
+                
+                %% Retry regular jobs
                 if any(isRegularJob)
-                     jobIx = jobIx(isRegularJob);  % Regular job
-                     list = {o.jobs(jobIx).JobName};
+                    jobIx = jobIx(isRegularJob);  % Regular job
+                    list = {o.jobs(jobIx).JobName};
                     
-                        alreadyRetried = {};
-                        for j=jobIx
-                            batchFile = slurm.decodeComment(o.jobs(j).Comment,'sbatch');
-                            if length(batchFile)~=1 || isempty(batchFile{1})
-                                error('The comment field should contain the batch file...');
-                            else
-                                batchFile = batchFile{1};
-                            end
-                            if ~ismember(batchFile,alreadyRetried)
-                                o.sbatch('retryBatchFile',batchFile);
-                                alreadyRetried = cat(2,alreadyRetried,batchFile);
-                            end
-                        end                    
+                    alreadyRetried = {};
+                    for j=jobIx
+                        batchFile = slurm.decodeComment(o.jobs(j).Comment,'sbatch');
+                        if length(batchFile)~=1 || isempty(batchFile{1})
+                            error('The comment field should contain the batch file...');
+                        else
+                            batchFile = batchFile{1};
+                        end
+                        if ~ismember(batchFile,alreadyRetried)
+                            o.sbatch('retryBatchFile',batchFile);
+                            alreadyRetried = cat(2,alreadyRetried,batchFile);
+                        end
+                    end
                 end
                 %% Retry taskBatchJobs and taskBatch collateJobs
                 if any(isTaskBatch)
@@ -1209,27 +1270,27 @@ classdef slurm < handle
                     
                     %only one taskBatch should be retried at a time
                     uTaskBatch = unique(list);
-                   	if length(uTaskBatch)>1
-                        fprintf(2,'Sorry, only retry one taskBatch at a time. Please retry separately. \n');                    
+                    if length(uTaskBatch)>1
+                        fprintf(2,'Sorry, only retry one taskBatch at a time. Please retry separately. \n');
                     else
-
+                        
                         if isTaskBatchCollate
                             resubmitAnswer = questdlg('Resubmit AS IS, or change Imputs?', ...
-                            'Resubmission Options', ...
-                            'Resubmit','Change Inputs','Cancel','Cancel');
-                        
+                                'Resubmission Options', ...
+                                'Resubmit','Change Inputs','Cancel','Cancel');
+                            
                             if strcmpi(resubmitAnswer,'Change Inputs')
                                 elementInArray = 1;
-                                locFullFile = logFile(o,jobIDs{1},'type','sh');
+                                locFullFile = getFile(o,jobIDs{1},'type','sh');
                                 [pth,locFile] = fileparts(locFullFile);
-                                newFile = strsplit(locFile,'-');                            
+                                newFile = strsplit(locFile,'-');
                                 newBatchFile = [newFile{1} '-tbRCollate.sh'];
                                 srcFid =fopen(locFullFile,'r');
-                                trgFid =fopen(fullfile(pth,newBatchFile),'w');   
+                                trgFid =fopen(fullfile(pth,newBatchFile),'w');
                                 while (true)
                                     line = fgetl(srcFid);
                                     if line==-1;break;end
-                                    if contains(line,'#SBATCH --array')                                    
+                                    if contains(line,'#SBATCH --array')
                                         continue;%skip
                                     elseif contains(line,'#SBATCH --output') || contains(line,'#SBATCH --error')
                                         line = strrep(line,'%A_%a.out','%A.out');
@@ -1240,49 +1301,49 @@ classdef slurm < handle
                                     elseif contains(line,'#SBATCH --comment')
                                         line = ['#SBATCH --comment=sbatch:' newBatchFile];
                                     elseif contains(line,'srun  matlab')
-                                        line = strrep(line,'$SLURM_ARRAY_TASK_ID',num2str(elementInArray));                                    
+                                        line = strrep(line,'$SLURM_ARRAY_TASK_ID',num2str(elementInArray));
                                     elseif contains(line,'#SBATCH --time')
-                                     	startInputIdx = strfind(line,'time=')+5;
-                                      %  if strcmpi(resubmitAnswer,'Change Inputs')
-                                            jobParmPrompt = {'wall-time:'};
-                                            dlgtitle = 'Change Wall-Time?';
-                                            dims = [1 35];
-                                            definput = {line(startInputIdx:end)};
-                                            jobParmAnswer = inputdlg(jobParmPrompt,dlgtitle,dims,definput);
-                                            line = ['#SBATCH --time=' jobParmAnswer{1}];
-                                       % else
-                                          %  line = ['#SBATCH --time' line(startInputIdx:end)];
-                                       % end
+                                        startInputIdx = strfind(line,'time=')+5;
+                                        %  if strcmpi(resubmitAnswer,'Change Inputs')
+                                        jobParmPrompt = {'wall-time:'};
+                                        dlgtitle = 'Change Wall-Time?';
+                                        dims = [1 35];
+                                        definput = {line(startInputIdx:end)};
+                                        jobParmAnswer = inputdlg(jobParmPrompt,dlgtitle,dims,definput);
+                                        line = ['#SBATCH --time=' jobParmAnswer{1}];
+                                        % else
+                                        %  line = ['#SBATCH --time' line(startInputIdx:end)];
+                                        % end
                                         
-                                	elseif contains(line,'#SBATCH --mem')
-                                     	startInputIdx = strfind(line,'mem=')+4;
-                                       % if strcmpi(resubmitAnswer,'Change Inputs')
-                                            jobParmPrompt = {'memory (GB)'};
-                                            dlgtitle = 'Change Memory?';
-                                            dims = [1 35];
-                                            definput = {line(startInputIdx:end)};
-                                            jobParmAnswer = inputdlg(jobParmPrompt,dlgtitle,dims,definput);
-                                            line = ['#SBATCH --mem=' jobParmAnswer{1}];
-                                       % else
-                                           % line = '#SBATCH --time=12:0:00';
-                                       % end
+                                    elseif contains(line,'#SBATCH --mem')
+                                        startInputIdx = strfind(line,'mem=')+4;
+                                        % if strcmpi(resubmitAnswer,'Change Inputs')
+                                        jobParmPrompt = {'memory (GB)'};
+                                        dlgtitle = 'Change Memory?';
+                                        dims = [1 35];
+                                        definput = {line(startInputIdx:end)};
+                                        jobParmAnswer = inputdlg(jobParmPrompt,dlgtitle,dims,definput);
+                                        line = ['#SBATCH --mem=' jobParmAnswer{1}];
+                                        % else
+                                        % line = '#SBATCH --time=12:0:00';
+                                        % end
                                         
                                     elseif contains(line,'#SBATCH --partition')
-                                     	%startInputIdx = strfind(line,'partition=')+10;
+                                        %startInputIdx = strfind(line,'partition=')+10;
                                         %if strcmpi(resubmitAnswer,'Change Inputs')
-                                            resubmitPartitionAnswer = questdlg('Which Partition to Resubmit to?', ...
+                                        resubmitPartitionAnswer = questdlg('Which Partition to Resubmit to?', ...
                                             'Partition Options', ...
                                             'main','nm3','main,nm3','main,nm3');
-                                            line = ['#SBATCH --partition=' resubmitPartitionAnswer];
-                                      %  else
+                                        line = ['#SBATCH --partition=' resubmitPartitionAnswer];
+                                        %  else
                                         %    line = ['#SBATCH --partition=' line(startInputIdx:end)];
-                                       % end
+                                        % end
                                     end
-                                        fprintf(trgFid,'%s\n',line);                            
+                                    fprintf(trgFid,'%s\n',line);
                                 end
                                 fclose(trgFid);
                                 fclose(srcFid);
-
+                                
                                 o.put(fullfile(o.localStorage,newBatchFile),o.remoteStorage);
                                 o.sbatch('retryBatchFile',newBatchFile);
                                 
@@ -1294,33 +1355,33 @@ classdef slurm < handle
                                 else
                                     batchFile = batchFile{1};
                                 end
-                           
+                                
                                 o.sbatch('retryBatchFile',batchFile);
-                               
-                             
+                                
+                                
                             end
                         else
-
+                            
                             resubmitAnswer = questdlg('What should be resubmitted?', ...
-                            'Resubmission Options', ...
-                            'Complete TaskBatch','Selected Task Nr(s)','Cancel','Cancel');
-
+                                'Resubmission Options', ...
+                                'Complete TaskBatch','Selected Task Nr(s)','Cancel','Cancel');
+                            
                             % Handle response
                             switch resubmitAnswer
                                 case 'Complete TaskBatch'
                                     batchFile = slurm.decodeComment(o.jobs(taskBatchJobIx(1)).Comment,'sbatch');
                                     batchFile = batchFile{1};
                                     o.sbatch('retryBatchFile',batchFile);
-
+                                    
                                 case 'Selected Task Nr(s)'
                                     %separate jobID from taskID
                                     taskIds = {o.jobs(taskBatchJobIx).JobID};
                                     taskBatchId = taskIds{1}(1:strfind(taskIds{1},'_')-1);
                                     taskIds = strrep(taskIds,[taskBatchId '_'],'');
                                     taskIds = cellfun(@str2num,taskIds);
-
-                                	resubJobName = strrep(uTaskBatch{1},'-taskBatch','');
-                                   
+                                    
+                                    resubJobName = strrep(uTaskBatch{1},'-taskBatch','');
+                                    
                                     jobGroupDir = [o.remoteStorage '/' resubJobName];
                                     %remoteDataPath =  [jobGroupDir '/' resubJobName];
                                     fun = resubJobName(1:strfind(resubJobName,'_')-1);
@@ -1335,7 +1396,7 @@ classdef slurm < handle
                                     extractArgs = {'--time'; '--mem'; ' -sd '; 'dataFile'; 'argsFile'};
                                     
                                     %this assumes that the order of the dataFile and argsFile input arguments will not change in the future
-                                    for extractArgCntr = 1:length(extractArgs)                                       
+                                    for extractArgCntr = 1:length(extractArgs)
                                         whichLine = find(contains(originalInputArgsByLine,extractArgs{extractArgCntr}));
                                         switch extractArgs{extractArgCntr}
                                             
@@ -1374,17 +1435,17 @@ classdef slurm < handle
                                     jobParmAnswer = inputdlg(jobParmPrompt,dlgtitle,dims,definput);
                                     memorySize = jobParmAnswer{1};
                                     wallTime = jobParmAnswer{2};
-
+                                    
                                     %submit every selected task
                                     for taskCntr = 1:numel(taskIds)
                                         o.sbatch('jobName',[resubJobName '-reBatch_task_' num2str(taskIds(taskCntr))],'uniqueID','','batchOptions',{'time',wallTime,'partition','nm3,main','mem',memorySize},'mfile','slurm.taskBatchRun','mfileExtraInput',{'dataFile',dataFile,'argsFile',argsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userSibdoDir',userFolderDir},'runOptions','','nrInArray',0,'taskNr',taskIds(taskCntr),'debug',false,'startupDirectory',startupDirectory);
                                     end
-
+                                    
                                 case 'Cancel'
                                     fprintf(2,'Nothing to submit then. \n');
                                 otherwise
                                     fprintf(2,'Nothing to submit then. \n');
-
+                                    
                             end
                         end
                     end
@@ -1393,55 +1454,55 @@ classdef slurm < handle
                 %% Retry regular array jobs  (as regular non-array jobs)
                 if any(isRegularArray)
                     arrayJobIx = jobIx(isRegularArray);
-                    list = {o.jobs(arrayJobIx).JobName};                    
+                    list = {o.jobs(arrayJobIx).JobName};
                     for j=arrayJobIx
                         thisJobID = o.jobs(j).JobID;
                         tmp = strsplit(thisJobID,'_');
                         %arrayJobID = tmp{1};
                         elementInArray = tmp{2};
-                        batchFile = slurm.decodeComment(o.jobs(j).Comment,'sbatch');                        
+                        batchFile = slurm.decodeComment(o.jobs(j).Comment,'sbatch');
                         if length(batchFile)~=1 || isempty(batchFile{1})
                             error('The comment field should contain the batch file...');
                         else
-                            batchFile = batchFile{1};
+                            batchFile = batchFile{1}; %#ok<NASGU>
                         end
-                        % Make a copy 
-                            locFullFile = logFile(o,thisJobID,'type','sh');
-                            [pth,locFile] = fileparts(locFullFile);
-                            newFile = strsplit(locFile,'-');                            
-                            newBatchFile = [newFile{1} '-R' elementInArray '.sh'];
-                            srcFid =fopen(locFullFile,'r');
-                            trgFid =fopen(fullfile(pth,newBatchFile),'w');   
-                            while (true)
-                                line = fgetl(srcFid);
-                               if line==-1;break;end
-                                if contains(line,'#SBATCH --array')                                    
-                                    continue;%skip
-                                elseif contains(line,'#SBATCH --output') || contains(line,'#SBATCH --error')
-                                    line = strrep(line,'%A_%a.out','%A.out');
-                                elseif contains(line,'#SBATCH --job-name')
-                                    tmp = strsplit(line,'=');
-                                    tmp = strsplit(tmp{2},'-');
-                                    line = ['#SBATCH --job-name=' tmp{1} '-R' elementInArray];
-                                elseif contains(line,'#SBATCH --comment')
-                                    line = ['#SBATCH --comment=sbatch:' newBatchFile];
-                                elseif contains(line,'srun  matlab')
-                                    line = strrep(line,'$SLURM_ARRAY_TASK_ID',elementInArray);                                    
-                                elseif contains(line,'#SBATCH --time')
-                                    line = '#SBATCH --time=12:0:00';
-                                end
-                                    fprintf(trgFid,'%s\n',line);                            
+                        % Make a copy
+                        locFullFile = getFile(o,thisJobID,'type','sh');
+                        [pth,locFile] = fileparts(locFullFile);
+                        newFile = strsplit(locFile,'-');
+                        newBatchFile = [newFile{1} '-R' elementInArray '.sh'];
+                        srcFid =fopen(locFullFile,'r');
+                        trgFid =fopen(fullfile(pth,newBatchFile),'w');
+                        while (true)
+                            line = fgetl(srcFid);
+                            if line==-1;break;end
+                            if contains(line,'#SBATCH --array')
+                                continue;%skip
+                            elseif contains(line,'#SBATCH --output') || contains(line,'#SBATCH --error')
+                                line = strrep(line,'%A_%a.out','%A.out');
+                            elseif contains(line,'#SBATCH --job-name')
+                                tmp = strsplit(line,'=');
+                                tmp = strsplit(tmp{2},'-');
+                                line = ['#SBATCH --job-name=' tmp{1} '-R' elementInArray];
+                            elseif contains(line,'#SBATCH --comment')
+                                line = ['#SBATCH --comment=sbatch:' newBatchFile];
+                            elseif contains(line,'srun  matlab')
+                                line = strrep(line,'$SLURM_ARRAY_TASK_ID',elementInArray);
+                            elseif contains(line,'#SBATCH --time')
+                                line = '#SBATCH --time=12:0:00';
                             end
-                            fclose(trgFid);
-                            fclose(srcFid);
-                            
-                            o.put(fullfile(o.localStorage,newBatchFile),o.remoteStorage);
-          
-                            %if ~ismember(batchFile,alreadyRetried)
-                                o.sbatch('retryBatchFile',newBatchFile);
-                           %     alreadyRetried = cat(2,alreadyRetried,batchFile);
-                           % end
-                    end                     
+                            fprintf(trgFid,'%s\n',line);
+                        end
+                        fclose(trgFid);
+                        fclose(srcFid);
+                        
+                        o.put(fullfile(o.localStorage,newBatchFile),o.remoteStorage);
+                        
+                        %if ~ismember(batchFile,alreadyRetried)
+                        o.sbatch('retryBatchFile',newBatchFile);
+                        %     alreadyRetried = cat(2,alreadyRetried,batchFile);
+                        % end
+                    end
                 end
             end
         end
@@ -1476,59 +1537,119 @@ classdef slurm < handle
         end
         
         
-        function localName = logFile(o,jobId,varargin )
-            % Retrieve a log file from the cluster. This can be the redirected
-            % stdout (type =out) or stderr (type=err). (Although currently
-            % sbatch writes both out and err to the same .out file so the
-            % 'out' logfile has all the information.
-            % Input
+        function [T]=jobsTable(o,expression)
+            
+            % Often jobs belong together in a group. By using convention
+            % jobName =  Job-SubJob, the 'group' (job) and its elements (subjob)
+            % can be determined from the jobName. This is used by slurmGui to make the
+            % interaction with the logs less cluttered.
+            if nargin<2
+                % Default format  GROUP-SUB
+                expression = '(?<group>[\w_-]*)-(?<sub>[\w\d\.]*$)';
+            end
+            if o.nrJobs >0
+                jobNames = {o.jobs.JobName};
+                match = regexp(jobNames,expression,'names');
+                noGroupMatch = cellfun(@isempty,match);
+                [match{noGroupMatch}]= deal(struct('group','Not Grouped','sub',''));
+                match = cat(1,match{:});
+                T=struct2table(o.jobs,'AsArray',true);
+                T= addvars(T,{match.group}',o.failStateName', 'NewVariableNames',{'Group','FailState'});
+            else
+                T = table; % Empty table
+            end
+        end
+        
+        function [localName,msg] = getFile(o,jobId,varargin )
+            % Retrieve a  file from the cluster. This can be the redirected
+            % stdout (type =out) or stderr (type=err), or the bash shell script (type =sh)
+            % Currently sbatch writes both out and err to the same .out file so the
+            % 'err' file has no information.
+            % INPUT
             % jobId  = jobID
             % 'element' =  element of a job array (ignored for non-array batch
             % jobs).
-            % 'type' = 'out' or 'err'
+            % 'type' = 'out' or 'err' or 'sh'
             % 'forceRemote' = Force reading from remote [true].
             % OUTPUT
-            % File is opened in editor
+            %  localName = The full name of the file on the local/client
+            %  computer. This can be a cell array if multiple files are
+            %  requested (ie. for multiple jobids)
+            % msg = Error messages.
+            %  If the use provides no output argument, the file is opened in the editor
             %
             p =inputParser;
             p.addParameter('element',[],@isnumeric);% Element of array job
             p.addParameter('forceRemote',true,@islogical);% force reading from remote storage
-            p.addParameter('type','out',@(x) (ischar(x) && ismember(x,{'out','err','sh'})));            
+            p.addParameter('type','out',@(x) (ischar(x) && ismember(x,{'out','err','sh'})));
             p.parse(varargin{:});
             
             %% Construct the file name
-             
+            % For running jobs we use scontrol for completed jobs sacct.
+            % (scontrol only works for running jobs, sacct does not have
+            % the comment while the task is running. Strange but true.
+            if ischar(jobId);jobId= {jobId};end
+            nrFiles = numel(jobId);
+            filename = cell(1,nrFiles);
             [tf,ix] = ismember(jobId,{o.jobs.JobID});
-            if any(tf)
-                if strcmpi(p.Results.type,'SH')                   
-                    filename = slurm.decodeComment(o.jobs(ix).Comment,'sbatch');
-                    if length(filename)~=1 || isempty(filename{1})
-                        error('The comment field should contain the batch file...');
-                    else
-                        filename = filename{1};
-                    end
-                else
-                    filename = [ o.jobs(ix).JobID '.' p.Results.type];
+            if ~all(tf);error('JobIds not known.');end
+            
+            
+            for i=1:nrFiles
+                switch upper(p.Results.type)
+                    case 'SH'
+                        searchStr = 'Command';
+                        thisFilename = slurm.decodeComment(o.jobs(ix(i)).Comment,'sbatch');
+                        if iscell(thisFilename);thisFilename= thisFilename{1};end
+                    case 'OUT'
+                        searchStr ='StdOut';
+                        thisFilename =[o.jobs(ix(i)).JobID '.out'];
+                    case 'ERR'
+                        searchStr = 'StdErr';
+                        thisFilename =[o.jobs(ix(i)).JobID '.err'];
                 end
-            else
-                error(['No matching jobId found (' jobId ')']);
+                
+                if isempty(thisFilename)
+                    % Try scontrol
+                    thisFilename = o.command(['scontrol show job ' jobId{i} ' | awk -F= ''/' searchStr '=/{print $2}''']);
+                    if iscell(thisFilename);thisFilename = thisFilename{1};end
+                    [~,thisFilename,ext] = fileparts(thisFilename); % strip path
+                    thisFilename = [thisFilename ext]; %#ok<AGROW>
+                end
+                
+                filename{i} = thisFilename;
             end
-            %% Retrieve it from the cluster if not available local
-            localName= fullfile(o.localStorage,filename );
-            if ~exist(localName,'file') || p.Results.forceRemote
-                remoteName= strrep(fullfile(o.remoteStorage,filename ),'\','/');
-                if o.exist(remoteName,'file')
-                    o.ssh = scp_get(o.ssh,filename,o.localStorage,o.remoteStorage);
+            %% Retrieve it f,rom the cluster if not available local
+            msg = cell(1,nrFiles);
+            [msg{:}] = deal('');
+            localName = cell(1,nrFiles);
+            for i = 1:nrFiles
+                if isempty(filename{i})
+                    msg{i} = 'Could not determine filename';
                 else
-                    warning(['File does not exist: ' remoteName]);
-                    return;
+                    localName{i}= fullfile(o.localStorage,filename{i} );
+                    if ~exist(localName{i},'file') || p.Results.forceRemote
+                        remoteName= strrep(fullfile(o.remoteStorage,filename{i}),'\','/');
+                        if o.exist(remoteName,'file')
+                            o.ssh = scp_get(o.ssh,filename{i},o.localStorage,o.remoteStorage);
+                        else
+                            msg{i} = ['File does not exist: ' remoteName];
+                            if nargout <2
+                                warning(msg{i});
+                            end
+                        end
+                    end
                 end
             end
             if nargout==0
                 %% Open in editor
-                edit(localName);
+                edit(localName{:});
+            elseif nrFiles==1
+                % Return char if possible
+                localName =localName{1};
+                msg  = msg{1};
             end
-                
+            
         end
         
         
@@ -1568,28 +1689,48 @@ classdef slurm < handle
             p.addParameter('user',o.user,@ischar);
             p.addParameter('units','G',@(x)(strcmp(x,'G') | strcmp(x,'K')));
             p.addParameter('format','jobId,State,ExitCode,jobName,Comment,submit',@ischar);
-            p.addParameter('starttime',o.from,@(x)(ischar(x) || isnumeric(x)));
-            p.addParameter('endtime',o.to,@(x)(ischar(x) || isnumeric(x)));
+            p.addParameter('starttime',o.from,@(x)(ischar(x) || isnumeric(x) ||isdatetime(x)));
+            p.addParameter('endtime',o.to,@(x)(ischar(x) || isnumeric(x) || isdatetime(x)));
             p.addParameter('removeSteps',true,@islogical);
             p.parse(varargin{:});
             
-            if isnan(p.Results.jobId)
-                jobIdStr =  '';
-            elseif isnumeric(p.Results.jobId)
-                jobIdStr =sprintf('%d,',p.Results.jobId(:));
-                jobIdStr = ['--jobs=' jobIdStr];
+            if isnumeric(p.Results.jobId)
+                if isnan(p.Results.jobId)
+                    jobIdStr =  '';
+                else
+                    jobIdStr =sprintf('%d,',p.Results.jobId(:));
+                    jobIdStr = ['--jobs=' jobIdStr];
+                end
             else
                 if ischar(p.Results.jobId)
                     jobIds = cellstr(p.Results.jobId);
+                elseif iscellstr(p.Results.jobId)
+                    jobIds = p.Results.jobId;
                 end
                 jobIdStr = sprintf('--jobs=%s ', jobIds{:});
             end
-            if isinf(p.Results.endtime)
+            
+            if isdatetime(p.Results.endtime)
+                endTime = datenum(p.Results.endtime);
+            else
+                endTime = p.Results.endtime;
+            end
+            
+            if isdatetime(p.Results.starttime)
+                startTime = datenum(p.Results.starttime);
+            else
+                startTime = p.Results.starttime;
+            end
+            
+            
+            if isinf(endTime)
                 endTime = now+1;
             else
-                endTime = max(p.Results.starttime+1,p.Results.endtime);
+                endTime = max(startTime+1,endTime);
             end
-            o.from  = p.Results.starttime;
+            
+            
+            o.from  = startTime;
             o.to = endTime;
             
             if ~isempty(strfind(upper(p.Results.format),'SUBMIT')) %#ok<STREMP>
@@ -1612,7 +1753,7 @@ classdef slurm < handle
             % zoom in on a specific set of days. Currently favoring showing
             % more, rather than less.
             %cmd  = ['sacct  --parsable2 --format=' format '  ' jobIdStr userCmd ' --starttime=' datestr(p.Results.starttime,'yyyy-mm-ddTHH:MM:SS') ' --endtime=' datestr(endTime,'yyyy-mm-ddTHH:MM:SS')];
-            cmd  = ['sacct  --parsable2 --format=' format '  ' jobIdStr userCmd ' --starttime=' datestr(p.Results.starttime,'yyyy-mm-ddTHH:MM:SS') ' --units=' p.Results.units];
+            cmd  = ['sacct  --parsable2 --format=' format '  ' jobIdStr userCmd ' --starttime=' slurm.slurmTime(startTime) ' --units=' p.Results.units];
             results = o.command(cmd);
             if length(results)>1
                 fields = strsplit(results{1},'|');
@@ -1638,14 +1779,14 @@ classdef slurm < handle
                     % This makes it easier to spot such errors in the slurm
                     % gui, for  instance.
                     for s=1:numel(steps)
-                            if strcmpi(steps(s).State,'FAILED')
-                                dotIx =strfind(steps(s).JobID,'.');
-                                parentID = steps(s).JobID(1:dotIx-1);
-                                parentIx = strcmp(parentID,jobID);
-                                if any(parentIx)
-                                    data(parentIx).State = 'FAILED';
-                                end
+                        if strcmpi(steps(s).State,'FAILED')
+                            dotIx =strfind(steps(s).JobID,'.');
+                            parentID = steps(s).JobID(1:dotIx-1);
+                            parentIx = strcmp(parentID,jobID);
+                            if any(parentIx)
+                                data(parentIx).State = 'FAILED';
                             end
+                        end
                     end
                     
                 end
@@ -1654,12 +1795,16 @@ classdef slurm < handle
                 data =[];
                 elapsed = duration(0,0,0);
                 elapsed.Format = 'h';
-                return
             end
             
+            %Update internal.
             if nargout==0
+                % Sometimes we call sacct to retrieve a different type of
+                % information and then we don't want to update the cached
+                % job inofrmation
                 o.jobs = data;
             end
+            
         end
         
         
@@ -1785,11 +1930,7 @@ classdef slurm < handle
             p.parse(varargin{:});
             
             dataMatFile = matfile(p.Results.dataFile); % Matfile object for the data so that we can pass a slice
-            if ~isempty(p.Results.argsFile)  % args may have extra inputs for the user mfile
-                load(p.Results.argsFile);
-            else
-                args = {};
-            end
+            
             % Load a single element of the data cell array from the matfile and
             % pass it to the mfile, together with all the args.
             
@@ -1801,8 +1942,13 @@ classdef slurm < handle
                 error(['The data in ' p.Results.dataFile ' has the wrong type: ' class(data) ]);
             end
             
+            if ~isempty(p.Results.argsFile)  % args may have extra inputs for the user mfile
+                load(p.Results.argsFile);
+                result = feval(p.Results.mFile,data{:},args); % Pass all cells of the row to the mfile as argument (plus optional args)
+            else
+                result = feval(p.Results.mFile,data{:}); % No args, pass all cells of the row to the mfile as argument
+            end
             
-            result = feval(p.Results.mFile,data{:},args{:}); % Pass all cells of the row to the mfile as argument (plus optional args)
             
             % Save the result in the jobDir as 1.result.mat, 2.result.mat
             % etc.
@@ -1835,73 +1981,73 @@ classdef slurm < handle
             % 'taskData'  - if an array Job has been submitted then each worker receives a separate slice of data (default)
             %               use '
             try
-            
-            p = inputParser;
-            addParameter(p,'dataFile','');
-            addParameter(p,'argsFile','');
-            addParameter(p,'mFile','');
-            addParameter(p,'nodeTempDir','');
-            addParameter(p,'jobDir','');
-            addParameter(p,'totalNrTasks','');
-            addParameter(p,'userSibdoDir','');
-            parse(p,varargin{:});
-            
-            p.Results
-            
-            %if this is a collate job, then the taskNr will be 0, otherwise
-            %it will be the taskNr out of the numbers 1:nrInArray
-            
-            if ~isempty(p.Results.dataFile)
-                %preload data and args to pass (slices/subsets) to workers
-                dataMatFile = matfile(p.Results.dataFile) % Matfile object for the data so that we can pass a slice
-                dataMatFileInfo = whos(dataMatFile,'data')
-                argsMatFile = matfile(p.Results.argsFile) % Matfile object for the args so that we can slect slices of of data
                 
-                %data is a cell array and args is a struct which
-                %	contains the field 'tasks', which is a cell array
-                % 	-> pass a subset of data, and a subset of data in args of whatever has the same size as data.
-                %       Both subsets will be selected based on args.tasks{taskNr}
+                p = inputParser;
+                addParameter(p,'dataFile','');
+                addParameter(p,'argsFile','');
+                addParameter(p,'mFile','');
+                addParameter(p,'nodeTempDir','');
+                addParameter(p,'jobDir','');
+                addParameter(p,'totalNrTasks','');
+                addParameter(p,'userSibdoDir','');
+                parse(p,varargin{:});
                 
-                fullArgsFile = argsMatFile.args
-                argsTemp = rmfield(fullArgsFile,'tasks')
-                subTasks = fullArgsFile.tasks{taskNr}
-                args = argsTemp
-                args.tasks = subTasks
+                p.Results
                 
-                uDataIdx = unique(args.tasks)
-                dataSlice.data = cell(dataMatFileInfo.size)
-                for dataColCntr = 1:size(dataSlice.data,2)
-                    for uDataCntr = 1:numel(uDataIdx)
-                        dataSlice.data{uDataIdx(uDataCntr),dataColCntr} = cell2mat(dataMatFile.data(uDataIdx(uDataCntr),dataColCntr));
-                    end
-                end
-                %now get rid of all cells in args that are not needed
-                argsFieldNames = fieldnames(args);
-                for fieldNameCntr = 1:length(argsFieldNames)
-                    if isequal(size(args.(argsFieldNames{fieldNameCntr})),size(dataSlice.data))
-                        args.(argsFieldNames{fieldNameCntr}) = cell(dataMatFileInfo.size);
-                        for colCntr = 1:size(dataSlice.data,2)
-                            useIdx =  find(~cellfun(@isempty,dataSlice.data(:,2)));
-                            args.(argsFieldNames{fieldNameCntr})(useIdx,colCntr) = fullArgsFile.(argsFieldNames{fieldNameCntr})(useIdx,colCntr);
+                %if this is a collate job, then the taskNr will be 0, otherwise
+                %it will be the taskNr out of the numbers 1:nrInArray
+                
+                if ~isempty(p.Results.dataFile)
+                    %preload data and args to pass (slices/subsets) to workers
+                    dataMatFile = matfile(p.Results.dataFile) %#ok<NOPRT> % Matfile object for the data so that we can pass a slice
+                    dataMatFileInfo = whos(dataMatFile,'data') %#ok<NOPRT>
+                    argsMatFile = matfile(p.Results.argsFile) %#ok<NOPRT> % Matfile object for the args so that we can slect slices of of data
+                    
+                    %data is a cell array and args is a struct which
+                    %	contains the field 'tasks', which is a cell array
+                    % 	-> pass a subset of data, and a subset of data in args of whatever has the same size as data.
+                    %       Both subsets will be selected based on args.tasks{taskNr}
+                    
+                    fullArgsFile = argsMatFile.args %#ok<NOPRT>
+                    argsTemp = rmfield(fullArgsFile,'tasks') %#ok<NOPRT>
+                    subTasks = fullArgsFile.tasks{taskNr} %#ok<NOPRT>
+                    args = argsTemp %#ok<NOPRT>
+                    args.tasks = subTasks %#ok<NOPRT>
+                    
+                    uDataIdx = unique(args.tasks) %#ok<NOPRT>
+                    dataSlice.data = cell(dataMatFileInfo.size) %#ok<NOPRT>
+                    for dataColCntr = 1:size(dataSlice.data,2)
+                        for uDataCntr = 1:numel(uDataIdx)
+                            dataSlice.data{uDataIdx(uDataCntr),dataColCntr} = cell2mat(dataMatFile.data(uDataIdx(uDataCntr),dataColCntr));
                         end
                     end
+                    %now get rid of all cells in args that are not needed
+                    argsFieldNames = fieldnames(args);
+                    for fieldNameCntr = 1:length(argsFieldNames)
+                        if isequal(size(args.(argsFieldNames{fieldNameCntr})),size(dataSlice.data))
+                            args.(argsFieldNames{fieldNameCntr}) = cell(dataMatFileInfo.size);
+                            for colCntr = 1:size(dataSlice.data,2)
+                                useIdx =  find(~cellfun(@isempty,dataSlice.data(:,2)));
+                                args.(argsFieldNames{fieldNameCntr})(useIdx,colCntr) = fullArgsFile.(argsFieldNames{fieldNameCntr})(useIdx,colCntr);
+                            end
+                        end
+                    end
+                    
+                    
+                    result = feval(p.Results.mFile,dataSlice.data,args); % Pass all cells of the row to the mfile as argument (plus optional args)
+                    
+                    % Save the result in the jobDir as 1.result.mat, 2.result.mat, etc.
+                    slurm.saveResult([num2str(taskNr) '.result.mat'],result,p.Results.nodeTempDir,p.Results.jobDir);
+                    
+                else %this means taskNr is 0 and we should collate instead
+                    result = slurm.taskBatchCollate(p.Results.jobDir,'mFile',p.Results.mFile,'totalNrTasks',p.Results.totalNrTasks); % Pass all cells of the row to the mfile as argument (plus optional args)
+                    
+                    %transfer the collated result tot he user's sibdo folder
+                    slurm.saveResult('collated.mat',result,p.Results.nodeTempDir,p.Results.userSibdoDir);
                 end
                 
-                
-                result = feval(p.Results.mFile,dataSlice.data,args); % Pass all cells of the row to the mfile as argument (plus optional args)
-                
-                % Save the result in the jobDir as 1.result.mat, 2.result.mat, etc.
-                slurm.saveResult([num2str(taskNr) '.result.mat'],result,p.Results.nodeTempDir,p.Results.jobDir);
-                
-            else %this means taskNr is 0 and we should collate instead
-                result = slurm.taskBatchCollate(p.Results.jobDir,'mFile',p.Results.mFile,'totalNrTasks',p.Results.totalNrTasks); % Pass all cells of the row to the mfile as argument (plus optional args)
-                
-                %transfer the collated result tot he user's sibdo folder
-                slurm.saveResult('collated.mat',result,p.Results.nodeTempDir,p.Results.userSibdoDir);
-            end
-            
             catch theCulprit
-                theCulprit
+                theCulprit %#ok<NOPRT>
                 theCulprit.stack(1)
             end
         end
@@ -1913,49 +2059,49 @@ classdef slurm < handle
             %or by using a function that the user specified for collating their results (see taskBatch).
             
             try
-            
-            p = inputParser;
-            addParameter(p,'mFile','');
-            addParameter(p,'totalNrTasks',1,@isnumeric);
-            parse(p,varargin{:});
-            
-            resultFileNames = dir(jobDir);
-            resultFileNames = {resultFileNames.name};
-            match = contains(resultFileNames,'.result.mat');
-            resultFileNames = resultFileNames(match);
-            
-            fileNrEndIdx = cell2mat(strfind(resultFileNames,'.result.mat'));
-            
-            fileIdx = nan(1,length(resultFileNames));
-            tempResult(p.Results.totalNrTasks).result = [];
-            
-            for fileCntr = 1:length(resultFileNames)
-                fileIdx(fileCntr) = str2double(resultFileNames{fileCntr}(1:fileNrEndIdx(fileCntr)-1));
-                tempResult(fileIdx(fileCntr)) = load([jobDir '/' num2str(fileIdx(fileCntr)) '.result.mat']);
-                %simplify the output to just 'result(1:nrInArray).fieldnames
-                %instead of result(1:nrInArray).result.fieldnames
-                fieldNames = fieldnames(tempResult(fileIdx(fileCntr)).result);
-                for fieldNameCntr = 1:length(fieldNames)
-                    preResult(fileIdx(fileCntr)).(fieldNames{fieldNameCntr}) = tempResult(fileIdx(fileCntr)).result.(fieldNames{fieldNameCntr}); %#ok
-                end
-            end
-            
-            
-            %decide how tasks should be collated
-            if isempty(p.Results.mFile) %the user didn't specify, so the result will be a struct array (result(1:nrInArray).result....)
-                result = preResult;
-            else        %the user did specify a function that was translated in to a string of numbers in taskBatch, so now we'll translate it back
-                collateFun = str2num(p.Results.mFile);  %#ok           %str2double doesn't work
-                collateFun = getArrayFromByteStream(uint8(collateFun));
                 
-                if contains(collateFun,'@')  %apparently we are dealing with a string that should be translated to a fucntion(-handle) again
-                    collateFun = str2func(collateFun);
+                p = inputParser;
+                addParameter(p,'mFile','');
+                addParameter(p,'totalNrTasks',1,@isnumeric);
+                parse(p,varargin{:});
+                
+                resultFileNames = dir(jobDir);
+                resultFileNames = {resultFileNames.name};
+                match = contains(resultFileNames,'.result.mat');
+                resultFileNames = resultFileNames(match);
+                
+                fileNrEndIdx = cell2mat(strfind(resultFileNames,'.result.mat'));
+                
+                fileIdx = nan(1,length(resultFileNames));
+                tempResult(p.Results.totalNrTasks).result = [];
+                
+                for fileCntr = 1:length(resultFileNames)
+                    fileIdx(fileCntr) = str2double(resultFileNames{fileCntr}(1:fileNrEndIdx(fileCntr)-1));
+                    tempResult(fileIdx(fileCntr)) = load([jobDir '/' num2str(fileIdx(fileCntr)) '.result.mat']);
+                    %simplify the output to just 'result(1:nrInArray).fieldnames
+                    %instead of result(1:nrInArray).result.fieldnames
+                    fieldNames = fieldnames(tempResult(fileIdx(fileCntr)).result);
+                    for fieldNameCntr = 1:length(fieldNames)
+                        preResult(fileIdx(fileCntr)).(fieldNames{fieldNameCntr}) = tempResult(fileIdx(fileCntr)).result.(fieldNames{fieldNameCntr}); %#ok
+                    end
                 end
                 
-                result = feval(collateFun,preResult);
                 
-            end
-            
+                %decide how tasks should be collated
+                if isempty(p.Results.mFile) %the user didn't specify, so the result will be a struct array (result(1:nrInArray).result....)
+                    result = preResult;
+                else        %the user did specify a function that was translated in to a string of numbers in taskBatch, so now we'll translate it back
+                    collateFun = str2num(p.Results.mFile);  %#ok           %str2double doesn't work
+                    collateFun = getArrayFromByteStream(uint8(collateFun));
+                    
+                    if contains(collateFun,'@')  %apparently we are dealing with a string that should be translated to a fucntion(-handle) again
+                        collateFun = str2func(collateFun);
+                    end
+                    
+                    result = feval(collateFun,preResult);
+                    
+                end
+                
             catch theCulprit
                 result = theCulprit;
             end
@@ -2026,7 +2172,7 @@ classdef slurm < handle
         
         
         
-        function saveResult(filename,result,tempDir,jobDir) %#ok<INUSL>
+        function saveResult(filename,result,tempDir,jobDir)
             % Save a result first on a tempDir on the node, then copy it to
             % the head node, using scp. Used by slurm.run
             [p,f,e] = fileparts(filename);
@@ -2058,6 +2204,47 @@ classdef slurm < handle
                 result %#ok<NOPRT>
             end
             
+        end
+        
+        function me = MException(code,message,varargin)
+            if nargin <2
+                message = MException.last.message;
+            end
+            if ~isnumeric(code) || code <1 || code >255
+                code  %#ok<NOPRT>
+                error('The code for an exception should be a number between 0 an 255' );
+            end
+            me = MException(sprintf('mslurm:e%d',code),message,varargin{:});
+        end
+        
+        function exit(me)
+            if isnumeric(me) && me==0
+                % All is well. Exit with code ==0;
+                exit(0);
+            else
+                % User code generated an exception. Translate to an error code for
+                % slurm and put some messages in the log.
+                if strcmpi(extractBefore(me.identifier,':'),'mslurm')
+                    % Exception generated with slurm.MException, the number
+                    % after :e is the exit code
+                    code = str2double(extractAfter(me.identifier,':e'));
+                else
+                    % A different kind of exception, use the generic exit
+                    % error code. of 1
+                    code = 1;
+                end
+                % Output callstack to help debugging
+                fprintf('*************Message***************\n')
+                fprintf('Line %d in %s generated error message:\n',me.stack(1).line,me.stack(1).name);
+                fprintf('-\n %s \n-\n',me.message );
+                fprintf('***************Call Stack************\n')
+                for i=1:numel(me.stack)
+                    fprintf('Line %d in %s (%s)\n',me.stack(i).line,me.stack(i).name,me.stack(i).file);
+                end
+                fprintf('************************************\n')
+                % Now exit
+                exit(code);
+            end
         end
     end
 end
