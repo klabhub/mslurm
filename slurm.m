@@ -1162,8 +1162,11 @@ classdef slurm < handle
                 % Start the sbatch
                 [result,err] = o.command(sprintf('cd %s ;sbatch %s/%s',o.remoteStorage,o.remoteStorage,batchFile));
                 jobId = str2double(regexp(result{1},'\d+','match'));
+                if iscell(err)
+                    err = err{1};
+                end
                 if isempty(jobId) || isnan(jobId)
-                    warning(['Failed to submit ' jobName ' (Msg=' result{1} ', Err: ' err{1} ' )']);
+                    warning(['Failed to submit ' jobName ' (Msg=' result{1} ', Err: ' err ' )']);
                 else
                     warning(['Successfully submitted ' jobName ' (JobID=' num2str(jobId) ')']);
                 end
