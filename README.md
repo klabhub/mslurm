@@ -3,7 +3,7 @@
 This is a toolbox to send Matlab jobs from your local machine (the client) to an HPC cluster running the SLURM scheduler (the server). As long as you have unlimited licenses to run Matlab on the cluster, this allows you to run many jobs in parallel, without the distributed computing server license. This only works for "dumb" parallelism though; messaging between jobs is not used. A simple gui shows information from the slumr acccounting log on the server, can retrieve data and log files, and allows you to restart failed jobs.
 
 
-*** Note that this toolbox does not use the Matlab Parallel Server. The disadvantage is that its many nice/useful features are not accessible. The advantage is that you don't need a MCP license. If you have an MCP license, then [kSlurm](https://github.com/klabhub/kSlurm) may be a better option for you. ***
+*** Note that this toolbox does not use the Matlab Parallel Server. The disadvantage is that its many nice/useful features are not accessible. The advantage is that you don't need a MPS license. If you have an MPS license, then [kSlurm](https://github.com/klabhub/kSlurm) may be a better option for you. ***
 
 ## Installation:
 
