@@ -1,6 +1,6 @@
 
 cls = slurm;
-cls.host = 'nm3hpc.newark.rutgers.edu';  % The host name of the cluster
+cls.host = 'amareln.newark.rutgers.edu';  % The host name of the cluster
 cls.localStorage = 'c:\temp';            % Staging area on the local client machine
 cls.user = '';  % Your user name on the cluster
 cls.keyfile = ''; %Provide the path to your RSA SSH auth file here.
