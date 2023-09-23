@@ -2205,7 +2205,7 @@ classdef slurm < handle
                 else %this means taskNr is 0 and we should collate instead
                     result = slurm.taskBatchCollate(p.Results.jobDir,'mFile',p.Results.mFile,'totalNrTasks',p.Results.totalNrTasks); % Pass all cells of the row to the mfile as argument (plus optional args)
 
-                    %transfer the collated result tot he user's  folder
+                    %transfer the collated result to the user's  folder
                     slurm.saveResult('collated.mat',result,p.Results.nodeTempDir,p.Results.userDir);
                 end
 
@@ -2334,17 +2334,27 @@ classdef slurm < handle
         end
 
         function batchRun(jobId,taskNr,varargin)
-
+            % This code runs on the cluster in response to a job submitted
+            % with batch. It does some sanity checks, loads any arguments
+            % passed to batch, and passes those to the function as a
+            % struct.            
             p =inputParser;
             p.addRequired('jobId')
             p.addRequired('taskNr')
             p.addParameter('mFile','')
+            p.addParameter('argsFile','')
+            p.addParameter('nodeTempDir','')
+            p.addParameter('jobDir','')
             p.KeepUnmatched = true;
             p.parse(jobId,taskNr,varargin{:});
 
+            p.Results
+
+            
             if ismember(exist(p.Results.mFile),[2 3 5 6 ]) %#ok<EXIST>  % Executable file
                 fprintf('%s batch file found\n',p.Results.mFile)
-                if isfield(p.Results,'argsFile')
+                
+                if ~isempty(p.Results,'argsFile')
                     if exist(p.Results.argsFile,"file")
                         fprintf('%s args file found\n',p.Results.argsFile)
                         args = load(p.Results.argsFile);
@@ -2354,21 +2364,38 @@ classdef slurm < handle
                 else
                     args =struct([]);
                 end
-
                 if nargin(p.Results.mFile)==0
                     if isempty(args)
                         % It is a script and no args provided.
                         eval(p.Results.mFile);
+                        isScript =true;
                     else
                         error('%s is a script and cannot take %d input arguments (%s). \n',p.Results.mFile,numel(fieldnames(args)),strjoin(fieldnames(args),'/'));
                     end
                 else
                     % A function, pass the input args as a struct
                     fprintf('Calling %s with %d input arguments (%s). \n',p.Results.mFile,numel(fieldnames(args)),strjoin(fieldnames(args),'/'));
-                    feval(p.Results.mFile,args);
+                    isScript =false;
+                    nout =nargout(p.Results.mFile);
+                    result = cell(1,nout);
+                    [result{:}]= feval(p.Results.mFile,args);
                 end
             else
                 error('%s does not exist. Cannot run this task.',p.Results.mfile)
+            end
+
+            %% Deal with the results
+            if isScript
+                clear p args isScript jobId taskNr
+                ws = whos;
+                if ~isempty(ws)
+                    %Save the workspace
+                     slurm.saveResult('result.mat',result,p.Results.nodeTempDir,p.Results.jobDir);
+                     %else- no output, nothing to save
+                end                    
+            else % A function with output that is now in the out cell array
+                slurm.saveResult(result.mat,result,p.Results.nodeTempDir,p.Results.jobDir);
+
             end
         end
 
