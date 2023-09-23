@@ -1677,11 +1677,11 @@ classdef mslurm < handle
                 jobNames = {o.jobs.JobName};
                 match = regexp(jobNames,expression,'names');
                 noGroupMatch = cellfun(@isempty,match);
-                [match{noGroupMatch}]= deal(struct('group','Other Jobs','sub',''));
+                [match{noGroupMatch}]= deal(struct('group','Jobs not submitted by mslurm','sub',''));
                 match = cat(1,match{:});
                 subs = {match.sub};
                 subs(noGroupMatch)= jobNames(noGroupMatch);
-                [jobNames{noGroupMatch}] = deal('Other Jobs');
+                [jobNames{noGroupMatch}] = deal('Jobs not submitted by mslurm');
                 [groups,~,groupIx] = unique({match.group});
                 nrGroups = length(groups);
                 jobIx = cell(1,nrGroups);
@@ -1706,7 +1706,7 @@ classdef mslurm < handle
                 jobNames = {o.jobs.JobName};
                 match = regexp(jobNames,expression,'names');
                 noGroupMatch = cellfun(@isempty,match);
-                [match{noGroupMatch}]= deal(struct('group','Other Jobs','sub',''));
+                [match{noGroupMatch}]= deal(struct('group','Jobs not submitted by mslurm','sub',''));
                 match = cat(1,match{:});
                 T=struct2table(o.jobs,'AsArray',true);
                 T= addvars(T,{match.group}',o.failStateName', 'NewVariableNames',{'Group','FailState'});
@@ -2376,19 +2376,16 @@ classdef mslurm < handle
             end
 
             %% Deal with the results
-            if isScript
-                ws = whos;
-                %Save the workspace
-                % Initialize a cell array to hold the variable values
-                result= cell(1,numel(ws));
-                for i = 1:length(result)
-                    result{i} = eval(ws.name{i}); % Store the variable value
-                end
-            end
-            if ~isempty(result)
-                % Save the result in the jobDir as 1.result.mat, 2.result.mat
-                mslurm.saveResult([num2str(p.Results.taskNr) '.result.mat'] ,result,p.Results.nodeTempDir,p.Results.jobDir);
-            end
+            ws = whos;
+            %Save the workspace
+            % Initialize a cell array to hold the variable values and names
+            vars = struct;            
+            for i = 1:length(ws)
+                vars.(ws.name{i})= eval(ws.name{i}); % Store the variable value                
+            end            
+            % Save the result in the jobDir as 1.result.mat, 2.result.mat
+            mslurm.saveResult([num2str(p.Results.taskNr) '.result.mat'] ,vars,p.Results.nodeTempDir,p.Results.jobDir);
+            
         end
 
 
