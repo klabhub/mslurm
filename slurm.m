@@ -634,7 +634,7 @@ classdef slurm < handle
             opts.jobName = jobName;
             opts.uniqueID = 'auto';
             opts.batchOptions = p.Results.batchOptions;
-            opts.mfile ='slurm.runBatch'; % This is the function that will interpret the input args and pass them to fun
+            opts.mfile ='slurm.batchRun'; % This is the function that will interpret the input args and pass them to fun
             opts.mfileExtraInput ={'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobDir};
             opts.debug = p.Results.debug;
             opts.runOptions= p.Results.runOptions;
