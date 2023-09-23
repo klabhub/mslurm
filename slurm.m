@@ -2373,7 +2373,7 @@ classdef slurm < handle
                 end
                 % Output callstack to help debugging
                 fprintf('*************Message***************\n')
-                fprintf('Line %d in %s generated error message:\n',me.stack(1).line,me.stack(1).name);
+                %fprintf('Line %d in %s generated error message:\n',me.stack(1).line,me.stack(1).name);
                 fprintf('-\n %s \n-\n',me.message );
                 fprintf('***************Call Stack************\n')
                 for i=1:numel(me.stack)
