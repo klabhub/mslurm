@@ -2381,7 +2381,7 @@ classdef mslurm < handle
             % Initialize a cell array to hold the variable values and names
             vars = struct;            
             for i = 1:length(ws)
-                vars.(ws.name{i})= eval(ws.name{i}); % Store the variable value                
+                vars.(ws(i).name)= eval(ws(i).name); % Store the variable value                
             end            
             % Save the result in the jobDir as 1.result.mat, 2.result.mat
             mslurm.saveResult([num2str(p.Results.taskNr) '.result.mat'] ,vars,p.Results.nodeTempDir,p.Results.jobDir);
