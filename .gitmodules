@@ -1,0 +1,4 @@
+[submodule "matlab-ssh2"]
+	path = matlab-ssh2
+	url = https://github.com/davidfreedman/matlab-ssh2.git
+	branch = master
