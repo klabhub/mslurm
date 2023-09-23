@@ -12,11 +12,11 @@
 % June 2017 - Public release.
 % Sept 2023 - Update.
 
-classdef slurm < handle
+classdef mslurm < handle
 
     properties (Constant)
         PREFGRP = "mSlurm"  % Group that stores string preferences for slurm
-        PREFS   = ["User","KeyFile","Host","RemoteStorage","LocalStorage", "MatlabRoot","NodeTempDir","HeadRootDir"];
+        PREFS   = ["user","keyfile","host","remoteStorage","localStorage", "matlabRoot","nodeTempDir","headRootDir"];
     end
 
     properties (SetAccess=public, GetAccess=public)
@@ -124,20 +124,20 @@ classdef slurm < handle
 
     %% Public Methods
     methods (Access=public)
-        function o = slurm(pv)
-            % Construct a slurm object.Specify parameter/value pairs for
+        function o = mslurm(pv)
+            % Construct a mslurm object.Specify parameter/value pairs for
             % Host, User, keyfile, remoteStorage, localStorage, and
             % matlabRoot. Parameters that are not specified use the
-            % preferences stored per machine (see slurm.install)
+            % preferences stored per machine (see mslurm.install)
             arguments
-                pv.host (1,1) string = slurm.getpref('Host');
-                pv.user (1,1) string = slurm.getpref('User');
-                pv.keyfile (1,1) string =slurm.getpref('KeyFile');
-                pv.remoteStorage (1,1) string = slurm.getpref('RemoteStorage');
-                pv.matlabRoot (1,1) string = slurm.getpref('MatlabRoot');
-                pv.localStorage (1,1) string = slurm.getpref('LocalStorage');
-                pv.nodeTempDir (1,1) string = slurm.getpref('NodeTempDir');
-                pv.headRootDir (1,1) string = slurm.getpref('HeadRootDir');
+                pv.host (1,1) string = mslurm.getpref('host');
+                pv.user (1,1) string = mslurm.getpref('user');
+                pv.keyfile (1,1) string =mslurm.getpref('keyfile');
+                pv.remoteStorage (1,1) string = mslurm.getpref('remoteStorage');
+                pv.matlabRoot (1,1) string = mslurm.getpref('matlabRoot');
+                pv.localStorage (1,1) string = mslurm.getpref('localStorage');
+                pv.nodeTempDir (1,1) string = mslurm.getpref('nodeTempDir');
+                pv.headRootDir (1,1) string = mslurm.getpref('headRootDir');
             end
             % Constructor.
             if isempty(which('ssh2'))
@@ -219,7 +219,7 @@ classdef slurm < handle
                     try
                         [o.ssh,results] = ssh2_command(o.ssh,cmd);
                     catch me
-                        if any(ismember({me.stack.name},'slurm.connect'))
+                        if any(ismember({me.stack.name},'mslurm.connect'))
                             % Avoid recursion.
                             rethrow(me)
                         else
@@ -370,10 +370,10 @@ classdef slurm < handle
             % The output argument is a cell array with the output of
             % the users' mfile. Jobs that failed will have an empty element
             % in the array. The order of results is the same as the order
-            % of the data provided to the mfile in the call to slurm.feval.
+            % of the data provided to the mfile in the call to mslurm.feval.
             %
             % tag = the tag (unique id) that identifies the job (returned
-            % by slurm.feval)
+            % by mslurm.feval)
             %
             % Pressing the 'g' key in the slurmGUI calls this function
             %
@@ -482,8 +482,8 @@ classdef slurm < handle
             % written.
             %
             % Slurm options can be specified as
-            % 'batchOptions'   -see slurm.sbatch
-            % 'runOptions' - see slurm.sbatch
+            % 'batchOptions'   -see mslurm.sbatch
+            % 'runOptions' - see mslurm.sbatch
             %
             % If the 'fun' is self-contained you can copy it to the server
             % with 'copy' set to true.
@@ -597,8 +597,8 @@ classdef slurm < handle
             % overrule those defaults.
             %
             % 'batchOptions' - passed to slurm the same way as in
-            %                   slurm.sbatch
-            % 'runOptions'  = also passed to slurm. See slurm.sbatch
+            %                   mslurm.sbatch
+            % 'runOptions'  = also passed to slurm. See mslurm.sbatch
             % 'copy' set to true to copy the mfile (fun) to the server.
             % Useful if the mfile you're executing is self-contained and
             % does not yet exist on the server. Note that it will be copied
@@ -609,7 +609,7 @@ classdef slurm < handle
             %
             % To retrieve the output each of the evaluations of fun, this
             % funciton returns a unique 'tag' that can be passed to
-            % slurm.retrieve().
+            % mslurm.retrieve().
             %
             %
 
@@ -669,7 +669,7 @@ classdef slurm < handle
             opts.jobName = jobName;
             opts.uniqueID = 'auto';
             opts.batchOptions = p.Results.batchOptions;
-            opts.mfile ='slurm.batchRun'; % This is the function that will interpret the input args and pass them to fun
+            opts.mfile ='mslurm.batchRun'; % This is the function that will interpret the input args and pass them to fun
             opts.mfileExtraInput ={'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobDir};
             opts.debug = p.Results.debug;
             opts.runOptions= p.Results.runOptions;
@@ -696,8 +696,8 @@ classdef slurm < handle
             % The following parm/value pairs control SLURM scheduling and
             % are not passed to the function
             % 'batchOptions' - passed to slurm the same way as in
-            %                   slurm.sbatch
-            % 'runOptions'  = also passed to slurm. See slurm.sbatch
+            %                   mslurm.sbatch
+            % 'runOptions'  = also passed to slurm. See mslurm.sbatch
             %
             %
             % 'copy' set to true to copy the mfile (fun) to the server.
@@ -708,7 +708,7 @@ classdef slurm < handle
             %
             % To retrieve the output each of the evaluations of fun, this
             % funciton returns a unique 'tag' that can be passed to
-            % slurm.retrieve().
+            % mslurm.retrieve().
             %
             %
             % EXAMPLE
@@ -724,7 +724,7 @@ classdef slurm < handle
             % the second worker;
             % output2 = analyzeMyData(data(2));
             % etc,
-            % Once everything has completed (check slurmGui) you can get
+            % Once everything has completed (check mslurmApp you can get
             % the results with
             % results = o.retrieve(tag);
             %  In tis example results{1} will contain output1, results{2}
@@ -835,7 +835,7 @@ classdef slurm < handle
             opts.jobName = jobName;
             opts.uniqueID = 'auto';
             opts.batchOptions = p.Results.batchOptions;
-            opts.mfile ='slurm.fevalRun';
+            opts.mfile ='mslurm.fevalRun';
             opts.mfileExtraInput ={'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobDir};
             opts.debug = p.Results.debug;
             opts.runOptions= p.Results.runOptions;
@@ -1096,7 +1096,7 @@ classdef slurm < handle
             end
 
             %run all tasks as an arrayJob
-            jobID = o.sbatch('jobName',[jobGroupName '-taskBatch'] ,'uniqueID','','batchOptions',p.Results.batchOptions,'mfile','slurm.taskBatchRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userDir',userFolderDir},'runOptions',p.Results.runOptions,'nrInArray',nrInArray,'debug',p.Results.debug,'startupDirectory',p.Results.startupDirectory);
+            jobID = o.sbatch('jobName',[jobGroupName '-taskBatch'] ,'uniqueID','','batchOptions',p.Results.batchOptions,'mfile','mslurm.taskBatchRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userDir',userFolderDir},'runOptions',p.Results.runOptions,'nrInArray',nrInArray,'debug',p.Results.debug,'startupDirectory',p.Results.startupDirectory);
 
 
             %start a collate job
@@ -1104,7 +1104,7 @@ classdef slurm < handle
                 dependency = sprintf('afterany:%s',num2str(jobID));  %execute this after the arrayJob has been succesfully submitted
 
                 %run the collateJob (via sbatch, which will run taskBatchRun)
-                collateJobId  = o.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','slurm.taskBatchRun','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',collateFun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userDir',finalFolderDir,'totalNrTasks',nrInArray},'runOptions',p.Results.runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug,'startupDirectory',p.Results.startupDirectory);
+                collateJobId  = o.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','mslurm.taskBatchRun','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',collateFun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userDir',finalFolderDir,'totalNrTasks',nrInArray},'runOptions',p.Results.runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug,'startupDirectory',p.Results.startupDirectory);
             end
 
             jobInfo.taskIds = jobID;
@@ -1143,7 +1143,7 @@ classdef slurm < handle
             % that would be run on the cluster. Nothing is actually run.
             %
             % 'retryBatchFile' - A batch file that will be queued on SLURM
-            % without further processing. This is used by the slurm.retry
+            % without further processing. This is used by the mslurm.retry
             % function.
             % 'uniqueID' - Use this to generate unique jobnames for each
             % job. If the specified jobName is already unique, set this to
@@ -1170,8 +1170,8 @@ classdef slurm < handle
             % of parameters  from the file that should be used for a particular
             % matlab session on the cluster.
             %
-            % See also slurm/feval for an example function that uses
-            % slurm/sbatch to submit jobs to the scheduler.
+            % See also mslurm/feval for an example function that uses
+            % mslurm/sbatch to submit jobs to the scheduler.
 
             p = inputParser;
             p.addParameter('jobName','job',@ischar );
@@ -1227,10 +1227,10 @@ classdef slurm < handle
                         wd = p.Results.workingDirectory;
                     end
                     if p.Results.nrInArray>=1
-                        runStr = ['matlab  ' sd ' -nodisplay -nodesktop -r  "try;%s;cd ''%s'';%s($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID %s);catch me;slurm.exit(me);end;slurm.exit(0);"'];
+                        runStr = ['matlab  ' sd ' -nodisplay -nodesktop -r  "try;%s;cd ''%s'';%s($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID %s);catch me;mslurm.exit(me);end;mslurm.exit(0);"'];
                         run = sprintf(runStr,addPathStr,wd,p.Results.mfile,extraIn);
                     else
-                        runStr = ['matlab ' sd ' -nodisplay -nodesktop -r "try;%s;cd ''%s''; %s($SLURM_JOB_ID,%d %s);catch me;slurm.exit(me);end;slurm.exit(0);"'];
+                        runStr = ['matlab ' sd ' -nodisplay -nodesktop -r "try;%s;cd ''%s''; %s($SLURM_JOB_ID,%d %s);catch me;mslurm.exit(me);end;mslurm.exit(0);"'];
                         run = sprintf(runStr,addPathStr,wd,p.Results.mfile,p.Results.taskNr,extraIn);
                     end
                 elseif ~isempty(p.Results.command)
@@ -1245,15 +1245,15 @@ classdef slurm < handle
                 if p.Results.nrInArray>=1
                     % Ensure that array job numbers generated by slurm are
                     % base-1 (default is base zero)
-                    batchOptions = cat(2,p.Results.batchOptions,{'array',['1-' num2str(p.Results.nrInArray)]});
+                    batchOpts = cat(2,p.Results.batchOptions,{'array',['1-' num2str(p.Results.nrInArray)]});
                     outFile = '%A_%a.out';
                 else
-                    batchOptions = p.Results.batchOptions;
+                    batchOpts = p.Results.batchOptions;
                     outFile = '%A.out';
                 end
                 % Options with empty values are removed.
-                empty = find(cellfun(@isempty,batchOptions(2:2:end)));
-                batchOptions([2*empty-1 2*empty])= [];
+                empty = find(cellfun(@isempty,batchOpts(2:2:end)));
+                batchOpts([2*empty-1 2*empty])= [];
                 if isempty(p.Results.uniqueID)
                     % Presumable the user knows what they're doing and the
                     % jobName is unique on its own
@@ -1268,19 +1268,19 @@ classdef slurm < handle
                 batchFile = sprintf('%s%s.sh',jobName,uniqueID);
                 fid  =fopen( fullfile(o.localStorage,batchFile) ,'w'); % no t (unix line endings are needed)
                 fprintf(fid,'#!/bin/bash\n');
-                batchOptions = cat(2,batchOptions, {'job-name',jobName,'output',outFile,'error',outFile,'comment',slurm.encodeComment('','sbatch',batchFile)});
-                for opt=1:2:numel(batchOptions)
-                    if isempty(batchOptions{opt+1})
-                        fprintf(fid,'#SBATCH --%s\n',batchOptions{opt});
-                    elseif isnumeric(batchOptions{opt+1})
-                        fprintf(fid,'#SBATCH --%s=%d\n',batchOptions{opt},batchOptions{opt+1});
-                    elseif ischar(batchOptions{opt+1})
-                        isSpace  = batchOptions{opt+1}==' ';
+                batchOpts = cat(2,batchOpts, {'job-name',jobName,'output',outFile,'error',outFile,'comment',mslurm.encodeComment('','sbatch',batchFile)});
+                for opt=1:2:numel(batchOpts)
+                    if isempty(batchOpts{opt+1})
+                        fprintf(fid,'#SBATCH --%s\n',batchOpts{opt});
+                    elseif isnumeric(batchOpts{opt+1})
+                        fprintf(fid,'#SBATCH --%s=%d\n',batchOpts{opt},batchOpts{opt+1});
+                    elseif ischar(batchOpts{opt+1})
+                        isSpace  = batchOpts{opt+1}==' ';
                         if any(isSpace)
-                            batchOptions{opt+1}(isSpace) = '';
-                            warnNoTrace(['Removing spaces from Slurm Batch Option ''' batchOptions{opt} ''' now set to:''' batchOptions{opt+1} '''']);
+                            batchOpts{opt+1}(isSpace) = '';
+                            warnNoTrace(['Removing spaces from Slurm Batch Option ''' batchOpts{opt} ''' now set to:''' batchOpts{opt+1} '''']);
                         end
-                        fprintf(fid,'#SBATCH --%s=%s\n',batchOptions{opt},batchOptions{opt+1});
+                        fprintf(fid,'#SBATCH --%s=%s\n',batchOpts{opt},batchOpts{opt+1});
                     else
                         error('sbatch options should be char or numeric');
                     end
@@ -1398,7 +1398,7 @@ classdef slurm < handle
 
                     alreadyRetried = {};
                     for j=jobIx
-                        batchFile = slurm.decodeComment(o.jobs(j).Comment,'sbatch');
+                        batchFile = mslurm.decodeComment(o.jobs(j).Comment,'sbatch');
                         if length(batchFile)~=1 || isempty(batchFile{1})
                             error('The comment field should contain the batch file...');
                         else
@@ -1496,7 +1496,7 @@ classdef slurm < handle
 
                             elseif strcmpi(resubmitAnswer,'Resubmit')
 
-                                batchFile = slurm.decodeComment(o.jobs(jobIx).Comment,'sbatch');
+                                batchFile = mslurm.decodeComment(o.jobs(jobIx).Comment,'sbatch');
                                 if length(batchFile)~=1 || isempty(batchFile{1})
                                     error('The comment field should contain the batch file...');
                                 else
@@ -1516,7 +1516,7 @@ classdef slurm < handle
                             % Handle response
                             switch resubmitAnswer
                                 case 'Complete TaskBatch'
-                                    batchFile = slurm.decodeComment(o.jobs(taskBatchJobIx(1)).Comment,'sbatch');
+                                    batchFile = mslurm.decodeComment(o.jobs(taskBatchJobIx(1)).Comment,'sbatch');
                                     batchFile = batchFile{1};
                                     o.sbatch('retryBatchFile',batchFile);
 
@@ -1557,7 +1557,7 @@ classdef slurm < handle
                                                 firstIdx = strfind(originalInputArgsByLine{whichLine},extractArgs{extractArgCntr})+5;
                                                 subString = originalInputArgsByLine{whichLine}(firstIdx:end);
                                                 lastIdx = strfind(subString,'-nodisplay')-2;
-                                                startupDirectory = subString(1:lastIdx);
+                                                startupDir = subString(1:lastIdx);
 
                                             case 'dataFile'
                                                 firstIdx = strfind(originalInputArgsByLine{whichLine},extractArgs{extractArgCntr})+11;
@@ -1585,7 +1585,7 @@ classdef slurm < handle
 
                                     %submit every selected task
                                     for taskCntr = 1:numel(taskIds)
-                                        o.sbatch('jobName',[resubJobName '-reBatch_task_' num2str(taskIds(taskCntr))],'uniqueID','','batchOptions',{'time',wallTime,'partition','nm3,main','mem',memorySize},'mfile','slurm.taskBatchRun','mfileExtraInput',{'dataFile',dataFile,'argsFile',argsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userDir',userFolderDir},'runOptions','','nrInArray',0,'taskNr',taskIds(taskCntr),'debug',false,'startupDirectory',startupDirectory);
+                                        o.sbatch('jobName',[resubJobName '-reBatch_task_' num2str(taskIds(taskCntr))],'uniqueID','','batchOptions',{'time',wallTime,'partition','nm3,main','mem',memorySize},'mfile','mslurm.taskBatchRun','mfileExtraInput',{'dataFile',dataFile,'argsFile',argsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userDir',userFolderDir},'runOptions','','nrInArray',0,'taskNr',taskIds(taskCntr),'debug',false,'startupDirectory',startupDir);
                                     end
 
                                 case 'Cancel'
@@ -1607,7 +1607,7 @@ classdef slurm < handle
                         tmp = strsplit(thisJobID,'_');
                         %arrayJobID = tmp{1};
                         elementInArray = tmp{2};
-                        batchFile = slurm.decodeComment(o.jobs(j).Comment,'sbatch');
+                        batchFile = mslurm.decodeComment(o.jobs(j).Comment,'sbatch');
                         if length(batchFile)~=1 || isempty(batchFile{1})
                             error('The comment field should contain the batch file...');
                         else
@@ -1658,7 +1658,7 @@ classdef slurm < handle
         function [groups,groupIx,subs,jobIx]=jobGroups(o,expression)
             % Often jobs belong together in a group. By using convention
             % jobName =  Job-SubJob, the 'group' (job) and its elements (subjob)
-            % can be determined from the jobName. This is used by slurmGui to make the
+            % can be determined from the jobName. This is used by slurmApp to make the
             % interaction with the logs less cluttered.
             if nargin<2
                 % Default format  GROUP-ESUB
@@ -1688,7 +1688,7 @@ classdef slurm < handle
 
             % Often jobs belong together in a group. By using convention
             % jobName =  Job-SubJob, the 'group' (job) and its elements (subjob)
-            % can be determined from the jobName. This is used by slurmGui to make the
+            % can be determined from the jobName. This is used by mslurmApp to make the
             % interaction with the logs less cluttered.
             if nargin<2
                 % Default format  GROUP-SUB
@@ -1746,7 +1746,7 @@ classdef slurm < handle
                 switch upper(p.Results.type)
                     case 'SH'
                         searchStr = 'Command';
-                        thisFilename = slurm.decodeComment(o.jobs(ix(i)).Comment,'sbatch');
+                        thisFilename = mslurm.decodeComment(o.jobs(ix(i)).Comment,'sbatch');
                         if iscell(thisFilename);thisFilename= thisFilename{1};end
                     case 'OUT'
                         searchStr ='StdOut';
@@ -1900,7 +1900,7 @@ classdef slurm < handle
             % zoom in on a specific set of days. Currently favoring showing
             % more, rather than less.
             %cmd  = ['sacct  --parsable2 --format=' format '  ' jobIdStr userCmd ' --starttime=' datestr(p.Results.starttime,'yyyy-mm-ddTHH:MM:SS') ' --endtime=' datestr(endTime,'yyyy-mm-ddTHH:MM:SS')];
-            cmd  = ['sacct  --parsable2 --format=' format '  ' jobIdStr userCmd ' --starttime=' slurm.slurmTime(startTime) ' --units=' p.Results.units];
+            cmd  = ['sacct  --parsable2 --format=' format '  ' jobIdStr userCmd ' --starttime=' mslurm.slurmTime(startTime) ' --units=' p.Results.units];
             results = o.command(cmd);
             if length(results)>1
                 fields = strsplit(results{1},'|');
@@ -1909,7 +1909,7 @@ classdef slurm < handle
                     data(j) = cell2struct(thisData,fields,2); %#ok<AGROW>
                 end
 
-                elapsed = datetime(datestr(slurm.matlabTime(data(end).Submit),0),'InputFormat','dd-MMM-yyyy HH:mm:SS')-datetime(datestr(slurm.matlabTime(data(1).Submit),0),'InputFormat','dd-MMM-yyyy HH:mm:SS');
+                elapsed = datetime(datestr(mslurm.matlabTime(data(end).Submit),0),'InputFormat','dd-MMM-yyyy HH:mm:SS')-datetime(datestr(mslurm.matlabTime(data(1).Submit),0),'InputFormat','dd-MMM-yyyy HH:mm:SS');
                 elapsed.Format = 'h';
                 if p.Results.removeSteps
                     % Remove the jobs that seem to be part of the jobs that I
@@ -1923,8 +1923,8 @@ classdef slurm < handle
                     % had jobs were Matlab was not even started due to some
                     % major node failure). Here we push that fail state to
                     % the parent job that is kept after removing the steps.
-                    % This makes it easier to spot such errors in the slurm
-                    % gui, for  instance.
+                    % This makes it easier to spot such errors in the mslurm
+                    % app, for  instance.
                     for s=1:numel(steps)
                         if strcmpi(steps(s).State,'FAILED')
                             dotIx =strfind(steps(s).JobID,'.');
@@ -2047,8 +2047,8 @@ classdef slurm < handle
 
 
         function fevalRun(jobID,taskNr,varargin) %#ok<INUSL>
-            % This function runs on the cluster in response to a call to slurm.feval on the client.
-            % It is not meant to be called directly. See slurm.feval.
+            % This function runs on the cluster in response to a call to mslurm.feval on the client.
+            % It is not meant to be called directly. See mslurm.feval.
             %
             % It will run a specified mfile on an element of the specified data array
             % INPUT:
@@ -2066,7 +2066,7 @@ classdef slurm < handle
             % 'nodeTempDir' - folder on the nodes where temporary
             % information can be saved (e.g. /scratch)
             % 'jobDir' - directory on the head node where the results are
-            % stored. (and later retrieved by slurm.retrieve)
+            % stored. (and later retrieved by mslurm.retrieve)
             %
             p = inputParser;
             p.addParameter('dataFile','');
@@ -2099,14 +2099,14 @@ classdef slurm < handle
 
             % Save the result in the jobDir as 1.result.mat, 2.result.mat
             % etc.
-            slurm.saveResult([num2str(taskNr) '.result.mat'] ,result,p.Results.nodeTempDir,p.Results.jobDir);
+            mslurm.saveResult([num2str(taskNr) '.result.mat'] ,result,p.Results.nodeTempDir,p.Results.jobDir);
         end
 
 
         function taskBatchRun(jobID,taskNr,varargin) %#ok
             % This function is a modified version of fevalRun and runs on the cluster in response to
-            % a call to slurm.taskBatch on the client.
-            % It is not meant to be called directly. See slurm.taskBatch.
+            % a call to mslurm.taskBatch on the client.
+            % It is not meant to be called directly. See mslurm.taskBatch.
             %
             % It will run a specified mfile on an element of the specified data array
             % INPUT:
@@ -2124,7 +2124,7 @@ classdef slurm < handle
             % 'nodeTempDir' - folder on the nodes where temporary
             % information can be saved (e.g. /scratch)
             % 'jobDir' - directory on the head node where the results are
-            % stored. (and later retrieved by slurm.retrieve)
+            % stored. (and later retrieved by mslurm.retrieve)
             % 'taskData'  - if an array Job has been submitted then each worker receives a separate slice of data (default)
             %               use '
             try
@@ -2184,13 +2184,13 @@ classdef slurm < handle
                     result = feval(p.Results.mFile,dataSlice.data,args); % Pass all cells of the row to the mfile as argument (plus optional args)
 
                     % Save the result in the jobDir as 1.result.mat, 2.result.mat, etc.
-                    slurm.saveResult([num2str(taskNr) '.result.mat'],result,p.Results.nodeTempDir,p.Results.jobDir);
+                    mslurm.saveResult([num2str(taskNr) '.result.mat'],result,p.Results.nodeTempDir,p.Results.jobDir);
 
                 else %this means taskNr is 0 and we should collate instead
-                    result = slurm.taskBatchCollate(p.Results.jobDir,'mFile',p.Results.mFile,'totalNrTasks',p.Results.totalNrTasks); % Pass all cells of the row to the mfile as argument (plus optional args)
+                    result = mslurm.taskBatchCollate(p.Results.jobDir,'mFile',p.Results.mFile,'totalNrTasks',p.Results.totalNrTasks); % Pass all cells of the row to the mfile as argument (plus optional args)
 
                     %transfer the collated result to the user's  folder
-                    slurm.saveResult('collated.mat',result,p.Results.nodeTempDir,p.Results.userDir);
+                    mslurm.saveResult('collated.mat',result,p.Results.nodeTempDir,p.Results.userDir);
                 end
 
             catch theCulprit
@@ -2256,9 +2256,9 @@ classdef slurm < handle
 
 
         function fileInFileOutRun(jobID,taskNr,varargin) %#ok<INUSL>
-            % This function runs on the cluster in response to a call to slurm.fileInFileOut on the client.
+            % This function runs on the cluster in response to a call to mslurm.fileInFileOut on the client.
             % It is not meant to be called directly. call
-            % slurm.fileInFileOut instead.
+            % mslurm.fileInFileOut instead.
             %
             % It will run a specified mfile on a file, and save the results
             % in a different file.
@@ -2314,7 +2314,7 @@ classdef slurm < handle
 
             % Save the result first locally then scp to outPath
             % puts them back to the main path. Local saves are more reliable
-            slurm.saveResult(outFile{1},result,p.Results.nodeTempDir,outPath);
+            mslurm.saveResult(outFile{1},result,p.Results.nodeTempDir,outPath);
         end
 
         function batchRun(jobId,taskNr,varargin)
@@ -2379,7 +2379,7 @@ classdef slurm < handle
             end
             if ~isempty(result)
                 % Save the result in the jobDir as 1.result.mat, 2.result.mat
-                slurm.saveResult([num2str(p.Results.taskNr) '.result.mat'] ,result,p.Results.nodeTempDir,p.Results.jobDir);
+                mslurm.saveResult([num2str(p.Results.taskNr) '.result.mat'] ,result,p.Results.nodeTempDir,p.Results.jobDir);
             end
         end
 
@@ -2387,7 +2387,7 @@ classdef slurm < handle
 
         function saveResult(filename,result,tempDir,jobDir)
             % Save a result first on a tempDir on the node, then copy it to
-            % the head node, using scp. Used by slurm.run
+            % the head node, using scp. Used by mslurm.run
             [p,f,e] = fileparts(filename);
             if isempty(e) % Force an extension
                 e ='.mat';
@@ -2438,7 +2438,7 @@ classdef slurm < handle
                 % User code generated an exception. Translate to an error code for
                 % slurm and put some messages in the log.
                 if strcmpi(extractBefore(me.identifier,':'),'mslurm')
-                    % Exception generated with slurm.MException, the number
+                    % Exception generated with mslurm.MException, the number
                     % after :e is the exit code
                     code = str2double(extractAfter(me.identifier,':e'));
                 else
@@ -2464,17 +2464,17 @@ classdef slurm < handle
 
         % Prefs are all strings
         function v =  getpref(pref)
-            % Retrieve a kSlurm preference
+            % Retrieve a mSlurm preference
             arguments
                 pref (1,:) {mustBeText} = ''
             end
             if isempty(pref)
                 % Show all
-                v = getpref(slurm.PREFGRP);
+                v = getpref(mslurm.PREFGRP);
             else
                 % Get a save preferred string value.
-                if ispref(slurm.PREFGRP,pref)
-                    v = string(getpref(slurm.PREFGRP,pref));
+                if ispref(mslurm.PREFGRP,pref)
+                    v = string(getpref(mslurm.PREFGRP,pref));
                 else
                     v = "";
                 end
@@ -2482,31 +2482,29 @@ classdef slurm < handle
         end
 
         function setpref(pref,value)
-            % Set one or more slurm preferences. Use this to define the
+            % Set one or more mslurm preferences. Use this to define the
             % cluster host name, user, identity file and job storage.
             % For instance:
-            % kSlurm.setpref('User','joe','IdentityFile','my_ssh_rsa',...
-            %               'Host','supercomputer.university.edu',...
-            %               'RemoteStorage','/scratch/joe/jobStorage')
+            % mslurm.setpref('IdentityFile','my_ssh_rsa')
             % Those settings will persist across Matlab sessions (but not
-            % Matlab versions) and allow you to call slurm with fewer
+            % Matlab versions) and allow you to call mslurm with fewer
             % input arguments.
             arguments
                 pref
                 value
             end
-            if ~ismember(pref,slurm.PREFS)
-                error('slurm only stores prefs for %s',strjoin(slurm.PREFS,'/'))
+            if ~ismember(pref,mslurm.PREFS)
+                error('mslurm only stores prefs for %s',strjoin(mslurm.PREFS,'/'))
             end
-            setpref(slurm.PREFGRP,pref,value);
+            setpref(mslurm.PREFGRP,pref,value);
         end
 
         function install()
             % Interactive install -  loop over the prefs to ask for values
             % then set.
-            for p = slurm.PREFS
+            for p = mslurm.PREFS                
                 value = string(input("Preferred value for " + p + "?",'s'));
-                slurm.setpref(p,value)
+                mslurm.setpref(p,value)
             end
         end
     end
