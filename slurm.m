@@ -308,7 +308,7 @@ classdef slurm < handle
             if nargin <2
                 options ='';
             end
-            uid = char(datetime("now",'Format','FFF'));
+            uid = char(datetime("now",'Format','sss'));
             filename = ['smap.output.' uid '.txt'];
             msg = o.command([' smap ' options ' -c > ' o.remoteStorage '/' filename]);
             try
@@ -2278,11 +2278,12 @@ classdef slurm < handle
             result = feval(p.Results.mFile,filename,args{:}); % Pass input file and optional args
             
             % Save the result first locally then scp to outPath
+            % puts them back to the main path. Local saves are more reliable
             slurm.saveResult(outFile{1},result,p.Results.nodeTempDir,outPath);
         end
         
         function batchRun(jobId,taskNr,varargin)
-            % puts them back to the main path. Local saves are more reliable
+            
             p =inputParser;
             p.addRequired('jobId')
             p.addRequired('taskNr')
@@ -2290,6 +2291,8 @@ classdef slurm < handle
             p.KeepUnMatched = true;
             p.parse(jobId,taskNr,varargin{:});
 
+            warning backtrace on
+            warning('mslurm:batchRun','Here we are');
             
             if exist(p.Results.mFile,"file")
                 if nargin(p.Results.mFile)==0
