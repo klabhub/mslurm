@@ -2358,7 +2358,6 @@ classdef slurm < handle
 
             if ismember(exist(p.Results.mFile),[2 3 5 6 ]) %#ok<EXIST>  % Executable file
                 fprintf('%s batch file found\n',p.Results.mFile)
-
                 if ~isempty(p.Results,'argsFile')
                     if exist(p.Results.argsFile,"file")
                         fprintf('%s args file found\n',p.Results.argsFile)
@@ -2391,16 +2390,17 @@ classdef slurm < handle
 
             %% Deal with the results
             if isScript
-                clear p args isScript jobId taskNr
                 ws = whos;
-                if ~isempty(ws)
-                    %Save the workspace
-                    slurm.saveResult('result.mat',result,p.Results.nodeTempDir,p.Results.jobDir);
-                    %else- no output, nothing to save
+                %Save the workspace
+                % Initialize a cell array to hold the variable values
+                result= cell(1,numel(ws));
+                for i = 1:length(result)
+                    result{i} = eval(ws.name{i}); % Store the variable value
                 end
-            else % A function with output that is now in the out cell array
-                slurm.saveResult(result.mat,result,p.Results.nodeTempDir,p.Results.jobDir);
-
+            end
+            if ~isempty(result)
+                % Save the result in the jobDir as 1.result.mat, 2.result.mat
+                slurm.saveResult([num2str(p.Results.taskNr) '.result.mat'] ,result,p.Results.nodeTempDir,p.Results.jobDir);
             end
         end
 
