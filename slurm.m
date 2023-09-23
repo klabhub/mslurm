@@ -28,7 +28,7 @@
 % Once the jobs have completed you retrieve the results using
 %  results = s.retrieve(tag)
 %
-% See also slurmGui.
+% See also slurmApp.
 %
 % BK - Jan 2015
 % June 2017 - Public release.
@@ -45,6 +45,11 @@ classdef slurm < handle
         to                  = Inf; % Until this time.
         nodeTempDir         = '';  % The path to a directory on a node that can be used to save data temporarily (e.g. /scratch/)
         headRootDir         = '';  % The path to the directory on the head node where results can be copied
+        startupDirectory    = '';  % The directory where matlab will start (-sd command line argument)
+        workingDirectory    = ''; % The directory where the code will execute (if unspecified, defaults to remoteStorage location)
+        addPath             = ''; % Folders that shoudl be added to the path. 
+        batchOptions        = {}; % Options passed to sbatch (parm,value pairs)
+        runOptions          = ''; % Options passed to srun
     end
     
     properties (Dependent,SetAccess=protected)
@@ -138,8 +143,7 @@ classdef slurm < handle
             % Constructor. Does not do anything except checking that shh2 is installed.
             if isempty(which('ssh2'))
                 error('Please install SSH2 from the FileExchange on Matlab Central (or add it to your path)');
-            end
-            warning backtrace off
+            end            
         end
         
         
@@ -171,9 +175,9 @@ classdef slurm < handle
             % remote execution).
             hasGit = o.command('which git');
             if isempty(hasGit{1})
-                warning('*****************************************************************');
-                warning('***The remote cluster does not have git installed... your code will not be pulled.***');
-                warning('*****************************************************************');
+                fprintf('*****************************************************************'\m);
+                warnNoTrace('***The remote cluster does not have git installed... your code will not be pulled.***');
+                fprintf('*****************************************************************\n');
             end
             if ischar(d)
                 d= {d};
@@ -183,9 +187,9 @@ classdef slurm < handle
                 result = unique(result);
                 for j=1:numel(result)
                     if isempty(result{j})
-                        warning(['Nothing to update (' d{i} ')']);
+                        warnNoTrace(['Nothing to update (' d{i} ')']);
                     else
-                        warning(['Remote Git update ( ' d{i} '): ' result{j} ]);
+                        warnNoTrace(['Remote Git update ( ' d{i} '): ' result{j} ]);
                     end
                 end
             end
@@ -202,7 +206,7 @@ classdef slurm < handle
                     err= 'unknonwn error';
                 end
             else
-                warning('Not connected...')
+                warnNoTrace('Not connected...')
                 results = {''};
             end
         end
@@ -315,7 +319,7 @@ classdef slurm < handle
             end
             localFile = fullfile(o.localStorage,filename);
             if nargout ==0
-                warning(msg);
+                warnNoTrace(msg);
                 edit(localFile);
                 
             else
@@ -363,18 +367,18 @@ classdef slurm < handle
                 nrSuccess  =sum(ismember(state(thisJob),[0 -1]));
                 
                 if nrFailed >0
-                    warning([num2str(nrFailed) ' jobs failed']);
+                    warnNoTrace([num2str(nrFailed) ' jobs failed']);
                 end
                 
                 if nrRunning >0
-                    warning([num2str(nrRunning) ' jobs still running']);
+                    warnNoTrace([num2str(nrRunning) ' jobs still running']);
                 end
                 if nrSuccess >0
-                    warning ([num2str(nrSuccess) ' jobs completed sucessfully']);
+                    warnNoTrace ([num2str(nrSuccess) ' jobs completed sucessfully']);
                 end
                 
                 if ~p.Results.partial && nrRunning >0
-                    warning([num2str(nrRunning) ' jobs are still running. Let''s wait a bit...']);
+                    warnNoTrace([num2str(nrRunning) ' jobs are still running. Let''s wait a bit...']);
                     return
                 end
             end
@@ -392,7 +396,7 @@ classdef slurm < handle
                 end
                 get(o,files,localJobDir,remoteJobDir);
             else
-                warning(['No files in job directory: ' remoteJobDir]);
+                warnNoTrace(['No files in job directory: ' remoteJobDir]);
                 return;
             end
             
@@ -418,7 +422,7 @@ classdef slurm < handle
             if p.Results.deleteLocal
                 [success,message]= rmdir(localJobDir,'s');
                 if ~success
-                    warning(['Could not delete the local job directory: ' localJobDir ' (' message ')']);
+                    warnNoTrace(['Could not delete the local job directory: ' localJobDir ' (' message ')']);
                 end
             end
         end
@@ -591,13 +595,13 @@ classdef slurm < handle
            
             
             p=inputParser;            
-            p.addParameter('batchOptions',{});
-            p.addParameter('runOptions','');
+            p.addParameter('batchOptions',o.batchOptions);
+            p.addParameter('runOptions',o.runOptions);
             p.addParameter('debug',false);
             p.addParameter('copy',false);
-            p.addParameter('startupDirectory','');
-            p.addParameter('workingDirectory','');
-            p.addParameter('addpath','');
+            p.addParameter('startupDirectory',o.startupDirectory);
+            p.addParameter('workingDirectory',o.workingDirectory);
+            p.addParameter('addPath',o.addPath);
             p.addParameter('nrWorkers',1);
             p.KeepUnmatched = true;
             p.parse(varargin{:});
@@ -621,9 +625,9 @@ classdef slurm < handle
                 % Copy the mfile to remote storage.
                 mfilename = which(fun);
                 o.put(mfilename,o.remoteStorage);
-                addPath = cat(2,p.Results.addPath,o.remoteStorage);
+                addToPath = cat(2,p.Results.addPath,o.remoteStorage);
             else
-                addPath = p.Results.addpath;
+                addToPath = p.Results.addPath;
             end
             
             %% Start the jobs
@@ -636,7 +640,7 @@ classdef slurm < handle
             opts.runOptions= p.Results.runOptions;
             opts.nrInArray = p.Results.nrWorkers;
             opts.startupDirectory = p.Results.startupDirectory;
-            opts.addpath = addPath;
+            opts.addPath = addToPath;
             opts.taskNr =1;
             o.sbatch(opts);
             
@@ -764,12 +768,12 @@ classdef slurm < handle
             o.put(localDataFile,jobDir);
             
             p=inputParser;
-            p.addParameter('batchOptions',{});
-            p.addParameter('runOptions','');
+            p.addParameter('batchOptions',o.batchOptions);
+            p.addParameter('runOptions',o.runOptions);
             p.addParameter('debug',false);
             p.addParameter('copy',false);
-            p.addParameter('startupDirectory','');
-            p.addParameter('addpath','');
+            p.addParameter('startupDirectory',o.startupDirectory);
+            p.addParameter('addPath',o.addPath);
             p.KeepUnmatched = true;
             p.parse(varargin{:});
             
@@ -802,7 +806,7 @@ classdef slurm < handle
             opts.runOptions= p.Results.runOptions;
             opts.nrInArray = nrDataJobs;
             opts.startupDirectory = p.Results.startupDirectory;
-            opts.addpath = p.Results.addpath;
+            opts.addPath = p.Results.addPath;
             opts.taskNr =1;
             o.sbatch(opts);
             
@@ -857,10 +861,10 @@ classdef slurm < handle
                 %this option is reserved for referencing previously submitted jobs
                 %to re-use data that already exists on the cluster
                 if ~isequal(sum(isletter(data)),0)
-                    warning(['checking whether data from the job with the name: "' data '" still exists...'])
+                    warnNoTrace(['checking whether data from the job with the name: "' data '" still exists...'])
                     dataType = 'jobName';
                 elseif isequal(sum(isletter(data)),0)
-                    warning(['checking whether data from the job with the ID: "' data '" still exists...'])
+                    warnNoTrace(['checking whether data from the job with the ID: "' data '" still exists...'])
                     dataType = 'jobID';
                 end
                 
@@ -952,7 +956,7 @@ classdef slurm < handle
                     if ~o.exist([targetJobFolder erase(targetJobName,'-taskBatch') '_data.mat'])
                         error(['the data file "' erase(targetJobName,'-taskBatch') '_data.mat"  does not exist anymore. You need to upload data for your job']);
                     else
-                        warning('... data found')
+                        warnNoTrace('... data found')
                     end
                 else
                     error(['the folder "' targetJobFolder '"  does not exist anymore. You need to upload data for your job']);
@@ -985,7 +989,7 @@ classdef slurm < handle
                     %this might be problematic if the same function will run on future jobs
                     %because those separete results will be hard to distinguish
                     finalFolderName =  ['sibdo/' getenv('USERNAME') '/' fun '_' uid '/'];
-                    warning('consider specifying either "jobName" or "outputFolder" or both so make your job and/or the folder where the results be saved more distinguishable. In particular if you are going to use this function for future but different jobs')
+                    warnNoTrace('consider specifying either "jobName" or "outputFolder" or both so make your job and/or the folder where the results be saved more distinguishable. In particular if you are going to use this function for future but different jobs')
                 end
             end
             
@@ -1136,7 +1140,7 @@ classdef slurm < handle
             
             p = inputParser;
             p.addParameter('jobName','job',@ischar );
-            p.addParameter('batchOptions',{},@iscell);
+            p.addParameter('batchOptions',o.batchOptions,@iscell);
             p.addParameter('runOptions','',@ischar);
             p.addParameter('mfile','',@ischar);
             p.addParameter('mfileExtraInput',{},@iscell); % pv pairs
@@ -1146,9 +1150,9 @@ classdef slurm < handle
             p.addParameter('retryBatchFile','',@ischar);
             p.addParameter('uniqueID','',@ischar); % Use 'auto' to generate
             p.addParameter('taskNr',0,@isnumeric);
-            p.addParameter('startupDirectory','',@ischar);% Matlab will startup in this directory (-sd command line argument)
-            p.addParameter('workingDirectory','',@ischar);
-            p.addParameter('addpath','',@ischar); % Add these folders to the Matlab path by calling addpath(x)
+            p.addParameter('startupDirectory',o.startupDirectory,@ischar);% Matlab will startup in this directory (-sd command line argument)
+            p.addParameter('workingDirectory',o.workingDirectory,@ischar);
+            p.addParameter('addPath',o.addPath,@ischar); % Add these folders to the Matlab path by calling addpath(x)
             p.parse(varargin{:});
             
             if isempty(p.Results.retryBatchFile)
@@ -1174,8 +1178,8 @@ classdef slurm < handle
                     end
 
                     
-                    if ~isempty(p.Results.addpath)
-                        addPathStr = sprintf('addpath(''%s'')',p.Results.addpath);
+                    if ~isempty(p.Results.addPath)
+                        addPathStr = sprintf('addpath(''%s'')',p.Results.addPath);
                     else
                         addPathStr = '';
                     end
@@ -1239,7 +1243,7 @@ classdef slurm < handle
                         isSpace  = batchOptions{opt+1}==' ';
                         if any(isSpace)
                             batchOptions{opt+1}(isSpace) = '';
-                            warning(['Removing spaces from Slurm Batch Option ''' batchOptions{opt} ''' now set to:''' batchOptions{opt+1} '''']);
+                            warnNoTrace(['Removing spaces from Slurm Batch Option ''' batchOptions{opt} ''' now set to:''' batchOptions{opt+1} '''']);
                         end
                         fprintf(fid,'#SBATCH --%s=%s\n',batchOptions{opt},batchOptions{opt+1});
                     else
@@ -1259,7 +1263,7 @@ classdef slurm < handle
             end
             
             if p.Results.debug
-                warning ('Debug mode. Nothing will be submitted to SLURM')
+                warnNoTrace ('Debug mode. Nothing will be submitted to SLURM')
                 edit (fullfile(o.localStorage,batchFile));
                 jobId=0;result = 'debug mode';
             else
@@ -1271,9 +1275,9 @@ classdef slurm < handle
                 [result,err] = o.command(sprintf('cd %s ;sbatch %s/%s',o.remoteStorage,o.remoteStorage,batchFile));
                 jobId = str2double(regexp(result{1},'\d+','match'));
                 if isempty(jobId) || isnan(jobId)
-                    warning(['Failed to submit ' jobName ' (Msg=' result{1} ', Err: ' err{1} ' )']);
+                    warnNoTrace(['Failed to submit ' jobName ' (Msg=' result{1} ', Err: ' err{1} ' )']);
                 else
-                    warning(['Successfully submitted ' jobName ' (JobID=' num2str(jobId) ')']);
+                    warnNoTrace(['Successfully submitted ' jobName ' (JobID=' num2str(jobId) ')']);
                 end
             end
         end
@@ -1292,7 +1296,7 @@ classdef slurm < handle
             end
             cmd = ['scancel ' sprintf('%s ',jobIds{:})];
             result = o.command(cmd);
-            %warning(result{1})
+            %warnNoTrace(result{1})
         end
         
         
@@ -1319,7 +1323,7 @@ classdef slurm < handle
             
             if o.nrJobs==0
                 list = {};
-                warning('No jobs found')
+                warnNoTrace('No jobs found')
             else
                 if isempty(p.Results.jobId)
                     state = o.failState;
@@ -1743,7 +1747,7 @@ classdef slurm < handle
                         else
                             msg{i} = ['File does not exist: ' remoteName];
                             if nargout <2
-                                warning(msg{i});
+                                warnNoTrace(msg{i});
                             end
                         end
                     end
@@ -1899,7 +1903,7 @@ classdef slurm < handle
                     
                 end
             else
-                %warning(['No sacct information was found for ' jobIdStr '(command = ' cmd ')']);
+                %warnNoTrace(['No sacct information was found for ' jobIdStr '(command = ' cmd ')']);
                 data =[];
                 elapsed = duration(0,0,0);
                 elapsed.Format = 'h';
@@ -2317,21 +2321,21 @@ classdef slurm < handle
             % Copy to head
             scpCommand = ['scp ' fName ' ' jobDir];
             tic;
-            warning(['Transferring data back to head node: ' scpCommand]);
+            warnNoTrace(['Transferring data back to head node: ' scpCommand]);
             [scpStatus,scpResult]  = system(scpCommand);
             if iscell(scpResult) ;scpResult = char(scpResult{:});end
             
             % Warn about scp errors
             if scpStatus~=0
                 scpResult %#ok<NOPRT>
-                warning(['SCP of ' fName ' failed' ]); % Signal error
+                warnNoTrace(['SCP of ' fName ' failed' ]); % Signal error
             elseif ~isempty(scpResult)
-                warning(scpResult)
+                warnNoTrace(scpResult)
             end
             
             [status,result]  = system(['rm  ' fName]);
             if status~=0
-                warning(['rm  of ' fName ' failed'  ]); % Warning only
+                warnNoTrace(['rm  of ' fName ' failed'  ]); % Warning only
                 result %#ok<NOPRT>
             end
             
