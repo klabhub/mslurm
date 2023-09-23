@@ -35,12 +35,18 @@
 
 classdef slurm < handle
     
+    properties (Constant)
+        PREFGRP = "mSlurm"  % Group that stores string preferences for slurm
+        PREFS   = ["User","KeyFile","Host","RemoteStorage","LocalStorage", "MatlabRoot","NodeTempDir","HeadRootDir"];
+    end
+
     properties (SetAccess=public, GetAccess=public)
         remoteStorage       = ''; % Location on HPC Cluster where scripts and logs will be written
         localStorage        = ''; % Location on client where logs and scripts will be written
         host                = ''; % Host Address
         user                = ''; % Remote user name
         keyfile             = ''; % Name of the SSH key file. (full name)
+        matlabRoot          = ''; % Matlab root on the cluster.
         from                = now - 1; % Retrieve logs from this time (use datenum format)
         to                  = Inf; % Until this time.
         nodeTempDir         = '';  % The path to a directory on a node that can be used to save data temporarily (e.g. /scratch/)
@@ -139,14 +145,37 @@ classdef slurm < handle
     
     %% Public Methods
     methods (Access=public)
-        function o = slurm
-            % Constructor. Does not do anything except checking that shh2 is installed.
+        function o = slurm(pv)            
+            % Construct a slurm object.Specify parameter/value pairs for
+            % Host, User, keyfile, remoteStorage, localStorage, and
+            % matlabRoot. Parameters that are not specified use the
+            % preferences stored per machine (see slurm.install)
+            arguments
+                pv.host (1,1) string = slurm.getpref('Host');
+                pv.user (1,1) string = slurm.getpref('User');
+                pv.keyfile (1,1) string =slurm.getpref('KeyFile');
+                pv.remoteStorage (1,1) string = slurm.getpref('RemoteStorage');
+                pv.matlabRoot (1,1) string = slurm.getpref('MatlabRoot');
+                pv.localStorage (1,1) string = slurm.getpref('LocalStorage');
+                pv.nodeTempDir (1,1) string = slurm.getpref('NodeTempDir');
+                pv.headRootDir (1,1) string = slurm.getpref('HeadRootDir');
+            end
+            % Constructor. 
             if isempty(which('ssh2'))
                 error('Please install SSH2 from the FileExchange on Matlab Central (or add it to your path)');
-            end            
+            end                        
+            % Setup the object with saved prefs, overruled by session specific
+            % input arguments to the constructor
+            o.host= char(pv.host);
+            o.user = char(pv.user);
+            o.keyfile = char(pv.keyfile);
+            o.remoteStorage = char(pv.remoteStorage);
+            o.matlabRoot = char(pv.matlabRoot);
+            o.localStorage = char(pv.localStorage);
+            o.nodeTempDir  = char(pv.nodeTempDir);
+            o.headRootDir = char(pv.headRootDir);
         end
-        
-        
+                
         function delete(o)
             % Destructor. Makes sure we close the SSH connection
             close(o);
@@ -202,8 +231,14 @@ classdef slurm < handle
                 if USESSHERR
                     [o.ssh,results,err] = ssh2_command(o.ssh,cmd); %#ok<UNRCH>
                 else
-                    [o.ssh,results] = ssh2_command(o.ssh,cmd);
                     err= 'unknonwn error';
+                    try
+                    [o.ssh,results] = ssh2_command(o.ssh,cmd);
+                    catch me
+                        warnNoTrace('SSH error. Trying to reconnect');
+                        connect(o);
+                        [o.ssh,results] = ssh2_command(o.ssh,cmd);
+                    end
                 end
             else
                 warnNoTrace('Not connected...')
@@ -241,7 +276,13 @@ classdef slurm < handle
             if ~o.exist(remoteDir,'dir')
                 result = o.command(['mkdir ' remoteDir]);
             end
-            o.ssh = scp_put(o.ssh,filename,remoteDir,localPath,filename);
+            try 
+                o.ssh = scp_put(o.ssh,filename,remoteDir,localPath,filename);
+            catch
+                warnNoTrace('SSH error. Trying to reconnect');
+                connect(o);
+                o.ssh = scp_put(o.ssh,filename,remoteDir,localPath,filename);
+            end
         end
         
         function get(o,files,localJobDir,remoteJobDir,deleteRemote)
@@ -258,7 +299,13 @@ classdef slurm < handle
                 end
             end
             disp('Starting data transfer...')
-            o.ssh = scp_get(o.ssh,files,localJobDir,remoteJobDir);
+            try 
+                o.ssh = scp_get(o.ssh,files,localJobDir,remoteJobDir);
+            catch
+                warnNoTrace('SSH error. Trying to reconnect');
+               connect(o)
+               o.ssh = scp_get(o.ssh,files,localJobDir,remoteJobDir);
+            end
             disp('Data transfer done.')
             
             %% cleanup if requested
@@ -580,13 +627,13 @@ classdef slurm < handle
             
             % Name the job after the current time. Assuming this will be
             % unique.
-           uid = char(datetime("now",'Format','yy.MM.dd_HH.mm.SS.sss'));
+            uid = char(datetime("now",'Format','yy.MM.dd_HH.mm.SS.sss'));
             if ~ischar(fun)
                 error('The fun argument must be the name of an m-file');
             end
             
             
-            jobName = [fun '-' uid];
+            jobName = matlab.lang.makeValidName([fun '-' uid]);
             jobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
             % Create a (unique) directory on the head node to store data and results.
             if ~o.exist(jobDir,'dir')
@@ -606,11 +653,10 @@ classdef slurm < handle
             p.KeepUnmatched = true;
             p.parse(varargin{:});
 
-            %% Find the unmatched and save as input arg?
-            
+            %% Find the unmatched and save as input arg.            
             if ~isempty(fieldnames(p.Unmatched))
                 args = p.Unmatched;
-                argsFile = [uid '_args.mat'];
+                argsFile = [jobName '_args.mat'];
                 % Save a local copy of the args
                 localArgsFile = fullfile(o.localStorage,argsFile);
                 remoteArgsFile = strrep(fullfile(jobDir,argsFile),'\','/');
@@ -1161,7 +1207,7 @@ classdef slurm < handle
                     % Wrap an mfile
                     extraIn = '';
                     for i=1:2:length(p.Results.mfileExtraInput)
-                        if ischar(p.Results.mfileExtraInput{i+1})
+                        if ischar(p.Results.mfileExtraInput{i+1}) || isstring(p.Results.mfileExtraInput{i+1})
                             strValue = ['''' p.Results.mfileExtraInput{i+1} ''''];
                         elseif isnumeric(p.Results.mfileExtraInput{i+1})
                             strValue = ['[' num2str(p.Results.mfileExtraInput{i+1}) ']'];
@@ -2299,8 +2345,17 @@ classdef slurm < handle
                     % It is a script
                     eval(p.Results.mFile);
                 else
-                    % A function, pass the input args as a struct                    
-                    feval(p.Results.mFile,p.Results)
+                    % A function, pass the input args as a struct       
+                    if isfield(p.Results,'argsFile') 
+                        if exist(p.Results.argsFile,"file")
+                            args = loag(p.Results.argsFile);
+                        else
+                            error('% argsFile not found.',p.Results.argsFile);
+                        end
+                        feval(p.Results.mFile,p.args);                    
+                    else
+                        eval(p.Results.mFile); % No inputs to this funciton (presumably they get defaults).
+                    end
                 end
             else
                 error('%s does not exist. Cannot run this task.',p.Results.mfile)
@@ -2381,6 +2436,57 @@ classdef slurm < handle
                 fprintf('************************************\n')
                 % Now exit
                 exit(code);
+            end
+        end
+
+
+        %% Tools to store machine wide preferences
+        
+        % Prefs are all strings
+        function v =  getpref(pref)
+            % Retrieve a kSlurm preference
+            arguments
+                pref (1,:) {mustBeText} = ''
+            end
+            if isempty(pref)
+                % Show all
+                v = getpref(slurm.PREFGRP);
+            else
+                % Get a save preferred string value.
+                if ispref(slurm.PREFGRP,pref)
+                    v = string(getpref(slurm.PREFGRP,pref));
+                else
+                    v = "";
+                end
+            end
+        end
+
+        function setpref(pref,value)
+            % Set one or more slurm preferences. Use this to define the
+            % cluster host name, user, identity file and job storage.
+            % For instance:
+            % kSlurm.setpref('User','joe','IdentityFile','my_ssh_rsa',...
+            %               'Host','supercomputer.university.edu',...
+            %               'RemoteStorage','/scratch/joe/jobStorage')
+            % Those settings will persist across Matlab sessions (but not
+            % Matlab versions) and allow you to call slurm with fewer
+            % input arguments.
+            arguments 
+                pref
+                value
+            end
+            if ~ismember(pref,slurm.PREFS)
+                error('slurm only stores prefs for %s',strjoin(slurm.PREFS,'/'))
+            end
+            setpref(slurm.PREFGRP,pref,value);
+        end
+
+        function install()
+            % Interactive install -  loop over the prefs to ask for values
+            % then set.
+            for p = slurm.PREFS
+                value = string(input("Preferred value for " + p + "?",'s'));
+                slurm.setpref(p,value)
             end
         end
     end
