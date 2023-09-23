@@ -20,14 +20,15 @@ classdef mslurm < handle
     end
 
     properties (SetAccess=public, GetAccess=public)
+        %% Installation defaults (read from preferences at construction)
         remoteStorage       = ''; % Location on HPC Cluster where scripts and logs will be written
         localStorage        = ''; % Location on client where logs and scripts will be written
         host                = ''; % Host Address
         user                = ''; % Remote user name
         keyfile             = ''; % Name of the SSH key file. (full name)
         matlabRoot          = ''; % Matlab root on the cluster.
-        from                = now - 1; % Retrieve logs from this time (use datenum format)
-        to                  = Inf; % Until this time.
+
+        %% Session defaults (can be overruled when submitting specific jobs).
         nodeTempDir         = '';  % The path to a directory on a node that can be used to save data temporarily (e.g. /scratch/)
         headRootDir         = '';  % The path to the directory on the head node where results can be copied
         startupDirectory    = '';  % The directory where matlab will start (-sd command line argument)
@@ -35,6 +36,10 @@ classdef mslurm < handle
         addPath             = ''; % Folders that shoudl be added to the path.
         batchOptions        = {}; % Options passed to sbatch (parm,value pairs)
         runOptions          = ''; % Options passed to srun
+
+        %% Other
+        from                = now - 1; % Retrieve logs from this time (use datenum format)
+        to                  = Inf; % Until this time.        
     end
 
     properties (Dependent,SetAccess=protected)
@@ -50,7 +55,7 @@ classdef mslurm < handle
 
     properties (SetAccess=protected, GetAccess=public, Transient)
         ssh;             % An SSH2 structure
-        maxArraySize;
+        maxArraySize;    % Read from the SLURM
     end
 
     %% Get/set methods for dependent properties
@@ -76,7 +81,7 @@ classdef mslurm < handle
             % All other jobs have a state that corresponds to the
             % cumulative number of attempts.
 
-            failedStates = {'CANCELLED','FAILED','NODE_FAIL','PREEMPTED','SUSPENDED','TIMEOUT'};
+           failedStates = {'CANCELLED','FAILED','NODE_FAIL','PREEMPTED','SUSPENDED','TIMEOUT'};
             %notFailedStates = {'COMPLETED','CONFIGURING','COMPLETING','PENDING','RUNNING','RESIZING'};
 
             % Find the failed jobs
@@ -110,7 +115,6 @@ classdef mslurm < handle
 
         function stateNames = get.failStateName(o)
             state = o.failState;
-
             % Map to a name
             stateNames = cell(size(state));
             [stateNames{state==0}] = deal('SUCCESS'); % (completed success)
@@ -160,7 +164,6 @@ classdef mslurm < handle
             close(o);
         end
 
-
         function close(o)
             % Close the SSH connection to the cluster
             if ~isempty(o.ssh)
@@ -169,6 +172,8 @@ classdef mslurm < handle
         end
 
         function v = fairshare(o,usr)
+            % Show the fairsahre score of the uer (or any user)
+            % 1= good, 0= bad.
             if nargin <2
                 usr = o.user;
             end
@@ -181,6 +186,9 @@ classdef mslurm < handle
             % Convenience function to pull a remote git repo from the
             % origin (typially used to sync local code development with
             % remote execution).
+            % INPUT
+            % d - The folder with a git repo on the cluster. Or a cell
+            % array with such folder names.
             hasGit = o.command('which git');
             if isempty(hasGit{1})
                 fprintf('*****************************************************************'\m);
@@ -223,7 +231,7 @@ classdef mslurm < handle
                             % Avoid recursion.
                             rethrow(me)
                         else
-                            % Try to reconnect
+                            % Try to reconnect once.
                             warnNoTrace('SSH error. Trying to reconnect');
                             connect(o);
                             [o.ssh,results] = ssh2_command(o.ssh,cmd);
@@ -396,10 +404,10 @@ classdef mslurm < handle
             p.parse(varargin{:});
             results ={};
             if p.Results.checkSacct
-                [sacctData] = o.sacct('format','jobName,State'); % Update accounting
+                o.sacct; % Update accounting
                 state = o.failState; %0 = success, -1 = success after failing, -2 = running, >0= number of attempts.
-                thisJob = strcmpi(tag,{sacctData.JobName});
-                nrRunning = sum(state(thisJob)==-2);
+                thisJob = strcmpi(tag,{o.jobs.JobName});
+               nrRunning = sum(state(thisJob)==-2);
                 nrFailed  = sum(state(thisJob)>0);
                 nrSuccess  =sum(ismember(state(thisJob),[0 -1]));
 
