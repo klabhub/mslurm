@@ -819,9 +819,14 @@ classdef mslurm < handle
             p.addParameter('debug',false);
             p.addParameter('copy',false);
             p.addParameter('startupDirectory',o.startupDirectory);
-            p.addParameter('addPath',o.addPath);
+            p.addParameter('addPath',o.addPath,@(x) iscellstr(x) || ischar(x));
             p.KeepUnmatched = true;
             p.parse(varargin{:});
+             if ischar(p.Results.addPath)
+                addPth = {p.Results.addPath};
+            else
+                addPth = p.Results.addPath;
+            end
 
             if ~isempty(fieldnames(p.Unmatched))
                 args = p.Unmatched;
@@ -852,7 +857,7 @@ classdef mslurm < handle
             opts.runOptions= p.Results.runOptions;
             opts.nrInArray = nrDataJobs;
             opts.startupDirectory = p.Results.startupDirectory;
-            opts.addPath = p.Results.addPath;
+            opts.addPath = addPth;
             opts.taskNr =1;
             o.sbatch(opts);
 
@@ -2351,31 +2356,21 @@ classdef mslurm < handle
 
             if ismember(exist(p.Results.mFile),[2 3 5 6 ]) %#ok<EXIST>  % Executable file
                 fprintf('%s batch file found\n',p.Results.mFile)
-                if ~isempty(p.Results.argsFile)
+                if isempty(p.Results.argsFile)
+                    % Run as script
+                     eval(p.Results.mFile);                        
+                else
                     if exist(p.Results.argsFile,"file")
                         fprintf('%s args file found\n',p.Results.argsFile)
                         load(p.Results.argsFile,'args');
                     else
                         error('% argsFile not found.',p.Results.argsFile);
-                    end
-                else
-                    args =struct([]);
-                end
-                if nargin(p.Results.mFile)==0
-                    if isempty(args)
-                        % It is a script and no args provided.
-                        eval(p.Results.mFile);
-                        isScript =true;
-                    else
-                        error('%s is a script and cannot take %d input arguments (%s). \n',p.Results.mFile,numel(fieldnames(args)),strjoin(fieldnames(args),'/'));
-                    end
-                else
+                    end                              
                     % A function, pass the input args as a struct
-                    fprintf('Calling %s with %d input arguments (%s). \n',p.Results.mFile,numel(fieldnames(args)),strjoin(fieldnames(args),'/'));
-                    isScript =false;
+                    fprintf('Calling %s with %d input arguments (%s). \n',p.Results.mFile,numel(fieldnames(args)),strjoin(fieldnames(args),'/'));                
                     nout =nargout(p.Results.mFile);
                     result = cell(1,nout);
-                    [result{:}]= feval(p.Results.mFile,args);
+                    [result{:}]= feval(p.Results.mFile,args);      %#ok<NASGU>
                 end
             else
                 error('%s does not exist. Cannot run this task.',p.Results.mFile)
