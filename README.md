@@ -1,30 +1,25 @@
 # mslurm
 
-This is a toolbox to send Matlab jobs from your local machine (the client) to an HPC cluster running the SLURM scheduler (the server). As long as you have unlimited licenses to run Matlab on the cluster, this allows you to run many jobs in parallel, without the distributed computing server license. This only works for "dumb" parallelism though; messaging between jobs is not used. A simple gui shows information from the slumr acccounting log on the server, can retrieve data and log files, and allows you to restart failed jobs.
+This is a toolbox to send Matlab jobs from your local machine (the client) to an HPC cluster running the SLURM scheduler (the server). As long as you have unlimited licenses to run Matlab on the cluster, this allows you to run many jobs in parallel, without the distributed computing server license. This only works for "dumb" parallelism though; messaging between jobs is not used. A simple app shows information from the slurm acccounting log on the server, can retrieve data and log files, and allows you to restart failed jobs.
 
 
-*** Note that this toolbox does not use the Matlab Parallel Server. The disadvantage is that its many nice/useful features are not accessible. The advantage is that you don't need a MPS license. If you have an MPS license, then [kSlurm](https://github.com/klabhub/kSlurm) may be a better option for you. ***
+*** Note that this toolbox does not use the Matlab Parallel Server. The disadvantage is that its many nice/useful features are not accessible. The advantage is that you don't need a MPS license. If you have an MPS license, then [kSlurm](https://github.com/klabhub/kSlurm) may be a better option for you. Although you should be warned that debugging code that runs through MPS is not for the faint of heart. ***
 
 ## Installation:
 
 ### Server side
-Make sure the command 'matlab' on the HPC cluster's command line starts Matlab. If it doesn't, add the path to  .bashrc. For instance, by adding the following line:
-PATH=$PATH:/opt/sw/packages/MATLAB/R2016a/bin/: 
-(but of course your installation path for Matlab on the cluster can vary).
 
 Clone the mslurm repository to the server.
-Add the mslurm directory to the Matlab search path on the server
+Add the mslurm directory to the Matlab search path on the server.
 
 ### Client Side
-Clone the mslurm repository to the client .
+Clone the mslurm repository to the client.
 Add the mslurm directory to the Matlab search path on the client.
 
-This package depends on the SSH2 package (David Freedman); install it:
-Clone the SSH2 repository (https://github.com/davidfreedman/matlab-ssh2.git) to the client and follow its instructions to set it up. 
-
-The GUI depends on the findjobj tool (Yair Altman). Download it from the file exchange:
-https://nl.mathworks.com/matlabcentral/fileexchange/14317-findjobj-find-java-handles-of-matlab-graphic-objects
-and add it to your Matlab install on the client. 
+On the command line, type
+slurm.install 
+to setup your preferences 
+USER: The 
 
 ## Usage
 See slurmExample.m in the mslurm directory for a commented example how to use the toolbox.

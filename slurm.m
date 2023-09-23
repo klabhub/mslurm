@@ -4,44 +4,13 @@
 % the Matlab Parallel Server, by simply starting as many Matlab sessions as
 % you request. 
 % 
-% This works well for jobs that are "dumb parallel". I.e., the jobs do not 
-% need to talk to each other. If you need interjob communication , then you need MPS. 
-% The mpsSlurm repository has some code to interact with MPS on SLURM, but be warned that the nice features
-% of MPS come with the downside that bugs/errors/problems in your code are
-% very difficult to debug.). 
-%
-% This class uses the matlab-ssh2 package from David Freedman for its SSH2 communication.
-% The relevant code is included as a Git submodule to simplify installation.
-%
+% See README.md for installation and instructions.
 % 
-% EXAMPLE:
-% Setup a connection to  a cluster
-% s =slurm;
-% s.host = 'wickedfast.university.edu';
-% s.user = 'username'
-% s.keyfile = 'mySSH_id_rsa'
-% slurm.m creates files that are stored in .localStorage
-% s.localSotrage  = 'c:/temp/jobStorage/';
-% These files are copied to the cluster in .remoteStorage
-% s.remoteStorage = '~/jobStorage/'
-% s.nodeTempDir = '/scratch/' % A directory where results can be written on the nodes
-% before they are copied to the head node)
-% s.connect ; % Check that we can connect.
-% % Assume that the mfile 'myComputation.m' exists on the cluster, it takes
-% a structure with data as its input and returns a single 'result' We have
-% an array of data (i.e. data(1)..data(N) and want to evaluate
-% 'myComputation' for each of these data sets. To achieve this, type:
-% tag = s.feval('myComputation',data);
-% This will start one worker/job for each element of data. 'tag' identifies
-% this partticular set of jobs.
-%
-% Once the jobs have completed you retrieve the results using
-%  results = s.retrieve(tag)
-%
 % See also slurmApp.
 %
 % BK - Jan 2015
 % June 2017 - Public release.
+% Sept 2023 - Update.
 
 classdef slurm < handle
 
