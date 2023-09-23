@@ -33,7 +33,7 @@ classdef mslurm < handle
         headRootDir         = '';  % The path to the directory on the head node where results can be copied
         startupDirectory    = '';  % The directory where matlab will start (-sd command line argument)
         workingDirectory    = ''; % The directory where the code will execute (if unspecified, defaults to remoteStorage location)
-        addPath             = ''; % Folders that shoudl be added to the path.
+        addPath             = {}; % Cell array of folders that shoudl be added to the path.
         batchOptions        = {}; % Options passed to sbatch (parm,value pairs)
         runOptions          = ''; % Options passed to srun
 
@@ -613,7 +613,7 @@ classdef mslurm < handle
             % to the .remoteStorage location and added to the search path.
             %
             % 'workingDirectory' Define the working directory.
-            % 'addPath' - Add this to the path on the cluster
+            % 'addPath' - Add this cell array of paths to the path on the cluster
             %
             % To retrieve the output each of the evaluations of fun, this
             % funciton returns a unique 'tag' that can be passed to
@@ -629,12 +629,16 @@ classdef mslurm < handle
             p.addParameter('copy',false,@islogical);
             p.addParameter('startupDirectory',o.startupDirectory,@ischar);
             p.addParameter('workingDirectory',o.workingDirectory,@ischar);
-            p.addParameter('addPath',o.addPath,@ischar);
+            p.addParameter('addPath',o.addPath,@(x) ischar(x) ||iscellstr(x));
             p.addParameter('nrWorkers',1);
             p.KeepUnmatched = true;
             p.parse(varargin{:});
 
-
+             if ischar(p.Results.addPath)
+                addPth = {p.Results.addPath};
+            else
+                addPth = p.Results.addPath;
+            end
             % Name the job after the current time. Assuming this will be
             % unique.
             uid = char(datetime("now",'Format','yy.MM.dd_HH.mm.SS.sss'));
@@ -645,9 +649,8 @@ classdef mslurm < handle
             jobName =[fun '-' uid];
             jobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
             % Create a (unique) directory on the head node to store data and results.
-            if ~o.exist(jobDir,'dir')
-                result = o.command(['mkdir ' jobDir]); %#ok<NASGU>
-            end
+            result = o.command(['mkdir ' jobDir]); %#ok<NASGU>
+            
 
 
             %% Find the unmatched and save as input arg.
@@ -667,10 +670,10 @@ classdef mslurm < handle
             if p.Results.copy
                 % Copy the mfile to remote storage.
                 mfilename = which(fun);
-                o.put(mfilename,o.remoteStorage);
-                addToPath = cat(2,p.Results.addPath,o.remoteStorage);
+                o.put(mfilename,jobDir);
+                addToPath = cat(2,addPth,jobDir);
             else
-                addToPath = p.Results.addPath;
+                addToPath = addPth;
             end
 
             %% Start the jobs
@@ -1195,9 +1198,13 @@ classdef mslurm < handle
             p.addParameter('taskNr',0,@isnumeric);
             p.addParameter('startupDirectory',o.startupDirectory,@ischar);% Matlab will startup in this directory (-sd command line argument)
             p.addParameter('workingDirectory',o.workingDirectory,@ischar);
-            p.addParameter('addPath',o.addPath,@ischar); % Add these folders to the Matlab path by calling addpath(x)
+            p.addParameter('addPath',o.addPath,@(x) ischar(x) || iscellstr(x)); % Add these folders to the Matlab path by calling addpath(x)
             p.parse(varargin{:});
-
+            if ischar(p.Results.addPath)
+                addPth = {p.Results.addPath};
+            else
+                addPth = p.Results.addPath;
+            end
             if isempty(p.Results.retryBatchFile)
                 %Construct a new batch file for sbatch
                 if ~isempty(p.Results.mfile)
@@ -1219,10 +1226,9 @@ classdef mslurm < handle
                     else
                         sd = '';
                     end
-
-
-                    if ~isempty(p.Results.addPath)
-                        addPathStr = sprintf('addpath(''%s'')',p.Results.addPath);
+                    addPth =strjoin(addPth,':');
+                    if ~isempty(addPth)
+                        addPathStr = sprintf('addpath(''%s'')',addPth);
                     else
                         addPathStr = '';
                     end
@@ -2372,7 +2378,7 @@ classdef mslurm < handle
                     [result{:}]= feval(p.Results.mFile,args);
                 end
             else
-                error('%s does not exist. Cannot run this task.',p.Results.mfile)
+                error('%s does not exist. Cannot run this task.',p.Results.mFile)
             end
 
             %% Deal with the results
