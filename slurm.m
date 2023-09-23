@@ -304,7 +304,7 @@ classdef slurm < handle
             if nargin <2
                 options ='';
             end
-            uid = datestr(now,'FFF');
+            uid = char(datetime("now",'Format','FFF'));
             filename = ['smap.output.' uid '.txt'];
             msg = o.command([' smap ' options ' -c > ' o.remoteStorage '/' filename]);
             try
@@ -503,7 +503,7 @@ classdef slurm < handle
             
             
             %% Setup the jobs
-            uid = datestr(now,'yy.mm.dd_HH.MM.SS.FFF');
+            uid = char(datetime("now",'Format','yy.MM.dd_HH.mm.SS.sss'));
             if ~ischar(fun)
                 error('The fun argument must be the name of an m-file');
             end
@@ -541,6 +541,104 @@ classdef slurm < handle
             %% Start the jobs
             o.sbatch('jobName',jobName,'uniqueID','auto','batchOptions',p.Results.batchOptions,'mfile','slurm.fileInFileOutRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir},'debug',p.Results.debug,'runOptions',p.Results.runOptions,'nrInArray',nrFiles,'taskNr',1);
             
+            
+        end
+        
+        function jobName = batch(o,fun,varargin)
+            % Evaluate the mfile (fun) in each of the 'nrWorkers'
+            %
+            % The mfile fun should be a function that takes
+            % parameter/value pairs specified in the call to fun as its input. 
+            %
+            % The following parm/value pairs control SLURM scheduling and
+            % are not passed to the function
+            % 'batchOptions' - passed to slurm the same way as in
+            %                   slurm.sbatch
+            % 'runOptions'  = also passed to slurm. See slurm.sbatch
+            %
+            %
+            % 'copy' set to true to copy the mfile (fun) to the server.
+            % Useful if the mfile you're executing is self-contained and
+            % does not yet exist on the server. Note that it will be copied
+            % to the .remoteStorage location and added to the search path 
+            % 
+            % 'cwd' Define hte working directory.
+            %
+            % To retrieve the output each of the evaluations of fun, this
+            % funciton returns a unique 'tag' that can be passed to
+            % slurm.retrieve().
+            %
+            %
+            % EXAMPLE
+            %
+
+            
+            
+            % Name the job after the current time. Assuming this will be
+            % unique.
+           uid = char(datetime("now",'Format','yy.MM.dd_HH.mm.SS.sss'));
+            if ~ischar(fun)
+                error('The fun argument must be the name of an m-file');
+            end
+            
+            
+            jobName = [fun '-' uid];
+            jobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
+            % Create a (unique) directory on the head node to store data and results.
+            if ~o.exist(jobDir,'dir')
+                result = o.command(['mkdir ' jobDir]); %#ok<NASGU>
+            end
+           
+            
+            p=inputParser;            
+            p.addParameter('batchOptions',{});
+            p.addParameter('runOptions','');
+            p.addParameter('debug',false);
+            p.addParameter('copy',false);
+            p.addParameter('startupDirectory','');
+            p.addParameter('workingDirectory','');
+            p.addParameter('addpath','');
+            p.addParameter('nrWorkers',1);
+            p.KeepUnmatched = true;
+            p.parse(varargin{:});
+
+            %% Find the unmatched and save as input arg?
+            
+            if ~isempty(fieldnames(p.Unmatched))
+                args = p.Unmatched;
+                argsFile = [uid '_args.mat'];
+                % Save a local copy of the args
+                localArgsFile = fullfile(o.localStorage,argsFile);
+                remoteArgsFile = strrep(fullfile(jobDir,argsFile),'\','/');
+                save(localArgsFile,'args');
+                % Copy the args file to the cluster
+                o.put(localArgsFile,jobDir);
+            else
+                remoteArgsFile ='';
+            end
+            
+            if p.Results.copy
+                % Copy the mfile to remote storage.
+                mfilename = which(fun);
+                o.put(mfilename,o.remoteStorage);
+                addPath = cat(2,p.Results.addPath,o.remoteStorage);
+            else
+                addPath = p.Results.addpath;
+            end
+            
+            %% Start the jobs
+            opts.jobName = jobName;
+            opts.uniqueID = 'auto';
+            opts.batchOptions = p.Results.batchOptions;
+            opts.mfile ='slurm.runBatch'; % This is the function that will interpret the input args and pass them to fun
+            opts.mfileExtraInput ={'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobDir};
+            opts.debug = p.Results.debug;
+            opts.runOptions= p.Results.runOptions;
+            opts.nrInArray = p.Results.nrWorkers;
+            opts.startupDirectory = p.Results.startupDirectory;
+            opts.addpath = addPath;
+            opts.taskNr =1;
+            o.sbatch(opts);
             
         end
         
@@ -625,7 +723,7 @@ classdef slurm < handle
             
             % Name the job after the current time. Assuming this will be
             % unique.
-            uid = datestr(now,'yy.mm.dd_HH.MM.SS.FFF');
+            uid = char(datetime("now",'Format','yy.MM.dd_HH.mm.SS.sss'));
             if ~ischar(fun)
                 error('The fun argument must be the name of an m-file');
             end
@@ -865,7 +963,7 @@ classdef slurm < handle
             %create a unique jobName for the group of tasks that is run on the cluster
             %but users are allowed to name the final output file, which
             %will be reflected in the name of the jobGroup
-            uid = datestr(now,'yymmdd_HHMMSS');
+            uid = char(datetime("now",'Format','yyMMdd_HHmmSS'));
             
             %where should the collated result from the taskBatch be saved
             if ~isempty(p.Results.outputFolder) %the user knows exactly where the result should end up
@@ -1037,7 +1135,7 @@ classdef slurm < handle
             % slurm/sbatch to submit jobs to the scheduler.
             
             p = inputParser;
-            p.addParameter('jobName','job',@ischar);
+            p.addParameter('jobName','job',@ischar );
             p.addParameter('batchOptions',{},@iscell);
             p.addParameter('runOptions','',@ischar);
             p.addParameter('mfile','',@ischar);
@@ -1049,6 +1147,7 @@ classdef slurm < handle
             p.addParameter('uniqueID','',@ischar); % Use 'auto' to generate
             p.addParameter('taskNr',0,@isnumeric);
             p.addParameter('startupDirectory','',@ischar);% Matlab will startup in this directory (-sd command line argument)
+            p.addParameter('workingDirectory','',@ischar);
             p.addParameter('addpath','',@ischar); % Add these folders to the Matlab path by calling addpath(x)
             p.parse(varargin{:});
             
@@ -1073,24 +1172,33 @@ classdef slurm < handle
                     else
                         sd = '';
                     end
+
                     
                     if ~isempty(p.Results.addpath)
                         addPathStr = sprintf('addpath(''%s'')',p.Results.addpath);
                     else
                         addPathStr = '';
                     end
+
+                    if isempty(p.Results.workingDirectory)
+                        % Run in remoteStorage directoryc
+                       wd = o.remoteStorage;
+                    else
+                        % Run in specified working Directory 
+                       wd = p.Results.workingDirectory;                    
+                    end
                     if p.Results.nrInArray>=1
-                        runStr = ['matlab  ' sd ' -nodisplay -nodesktop -r "try;%s;cd ''%s'';%s($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID %s);catch me;slurm.exit(me);end;slurm.exit(0);"'];
-                        run = sprintf(runStr,addPathStr,o.remoteStorage,p.Results.mfile,extraIn);
+                        runStr = ['matlab  ' sd ' -nodisplay -nodesktop -r  "try;%s;cd ''%s'';%s($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID %s);catch me;slurm.exit(me);end;slurm.exit(0);"'];
+                        run = sprintf(runStr,addPathStr,wd,p.Results.mfile,extraIn);
                     else
                         runStr = ['matlab ' sd ' -nodisplay -nodesktop -r "try;%s;cd ''%s''; %s($SLURM_JOB_ID,%d %s);catch me;slurm.exit(me);end;slurm.exit(0);"'];
-                        run = sprintf(runStr,addPathStr,o.remoteStorage,p.Results.mfile,p.Results.taskNr,extraIn);
+                        run = sprintf(runStr,addPathStr,wd,p.Results.mfile,p.Results.taskNr,extraIn);
                     end
                 elseif ~isempty(p.Results.command)
                     % The user knows what to do. Run this command as is with srun.
                     run = p.Results.command;
                 else
-                    error('command and run cannot both be empty...');
+                    error('command and mfile cannot both be empty...');
                 end
                 
                 
@@ -2169,7 +2277,30 @@ classdef slurm < handle
             slurm.saveResult(outFile{1},result,p.Results.nodeTempDir,outPath);
         end
         
-        
+        function batchRun(jobId,taskNr,varargin)
+            % puts them back to the main path. Local saves are more reliable
+            p =inputParser;
+            p.addRequired('jobId')
+            p.addRequired('taskNr')
+            p.addParameter('mFile','')
+            p.KeepUnMatched = true;
+            p.parse(jobId,taskNr,varargin{:});
+
+            
+            if exist(p.Results.mFile,"file")
+                if nargin(p.Results.mFile)==0
+                    % It is a script
+                    eval(p.Results.mFile);
+                else
+                    % A function, pass the input args as a struct                    
+                    feval(p.Results.mFile,p.Results)
+                end
+            else
+                error('%s does not exist. Cannot run this task.',mfileToRun)
+            end
+
+        end
+
         
         
         function saveResult(filename,result,tempDir,jobDir)
