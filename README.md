@@ -18,8 +18,16 @@ Add the mslurm directory to the Matlab search path on the client.
 
 On the command line, type
 slurm.install 
-to setup your preferences 
-USER: The 
+to setup your preferences:
+
+- **User:** The user name you use to connect to your HPC cluster
+- **KeyFile:** The SSH private key you use to authenticate. 
+- **Host:** The IP address or hostname of your cluster
+- **RemoteStorage:** A folder on the host where files can be saved. This includes files used to start jobs on the cluster and the output of jobs running on the cluster. (E.g., something like /scratch/username/jobStorage/)
+- **LocalStorage:** A folder on the client where files can be saved. This is mainly used for files needed to start jobs. (e.g., /tmp or c:\temp)
+- **NodeTempDir:** A folder that exists on all compute nodes. Intermediate job results will be written here. At the end of a job they are written to the headNodeDir. (e.g., /mnt/scratch or /tmp).
+- **HeadRootDir:** A folder that exists on the head node and from where you can retrieve the data. At the end of a job, results are written here.
+- **MatlabRoot:**  The folder  where the Matlab executable lives on the cluster. If specified, mslurm starts matlab by executing the MatlabRoot/matlab command on the cluster. (If left empty, this only works if 'matlab' is on your path on the cluster.)
 
 ## Usage
 See slurmExample.m in the mslurm directory for a commented example how to use the toolbox.
