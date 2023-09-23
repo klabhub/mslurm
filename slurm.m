@@ -650,7 +650,7 @@ classdef slurm < handle
                 error('The fun argument must be the name of an m-file');
             end
 
-            jobName = matlab.lang.makeValidName([fun '-' uid]);
+            jobName =[fun '-' uid];
             jobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
             % Create a (unique) directory on the head node to store data and results.
             if ~o.exist(jobDir,'dir')
@@ -1685,11 +1685,11 @@ classdef slurm < handle
                 jobNames = {o.jobs.JobName};
                 match = regexp(jobNames,expression,'names');
                 noGroupMatch = cellfun(@isempty,match);
-                [match{noGroupMatch}]= deal(struct('group','Not Grouped','sub',''));
+                [match{noGroupMatch}]= deal(struct('group','Other Jobs','sub',''));
                 match = cat(1,match{:});
                 subs = {match.sub};
                 subs(noGroupMatch)= jobNames(noGroupMatch);
-                [jobNames{noGroupMatch}] = deal('Not Grouped');
+                [jobNames{noGroupMatch}] = deal('Other Jobs');
                 [groups,~,groupIx] = unique({match.group});
                 nrGroups = length(groups);
                 jobIx = cell(1,nrGroups);
@@ -1714,7 +1714,7 @@ classdef slurm < handle
                 jobNames = {o.jobs.JobName};
                 match = regexp(jobNames,expression,'names');
                 noGroupMatch = cellfun(@isempty,match);
-                [match{noGroupMatch}]= deal(struct('group','Not Grouped','sub',''));
+                [match{noGroupMatch}]= deal(struct('group','Other Jobs','sub',''));
                 match = cat(1,match{:});
                 T=struct2table(o.jobs,'AsArray',true);
                 T= addvars(T,{match.group}',o.failStateName', 'NewVariableNames',{'Group','FailState'});
@@ -2342,30 +2342,34 @@ classdef slurm < handle
             p.KeepUnmatched = true;
             p.parse(jobId,taskNr,varargin{:});
 
-            warning backtrace on
-            warning('mslurm:batchRun','Here we are');
-
             if ismember(exist(p.Results.mFile),[2 3 5 6 ]) %#ok<EXIST>  % Executable file
+                fprintf('%s batch file found\m',p.Results.mFile)
+                if isfield(p.Results,'argsFile')
+                    if exist(p.Results.argsFile,"file")
+                        fprintf('%s args file found\m',p.Results.argsFile)
+                        args = loag(p.Results.argsFile);
+                    else
+                        error('% argsFile not found.',p.Results.argsFile);
+                    end
+                else
+                    args =[];
+                end
+
                 if nargin(p.Results.mFile)==0
-                    % It is a script
-                    eval(p.Results.mFile);
+                    if isempty(args)
+                        % It is a script and no args provided.
+                        eval(p.Results.mFile);
+                    else
+                        error('%s is a script and cannot take %d input arguments (%s). \n',p.Results.mFile,numel(fieldnames(args)),strjoin(fieldnames(args),'/'));
+                    end
                 else
                     % A function, pass the input args as a struct
-                    if isfield(p.Results,'argsFile')
-                        if exist(p.Results.argsFile,"file")
-                            args = loag(p.Results.argsFile);
-                        else
-                            error('% argsFile not found.',p.Results.argsFile);
-                        end
-                        feval(p.Results.mFile,args);
-                    else
-                        eval(p.Results.mFile); % No inputs to this funciton (presumably they get defaults).
-                    end
+                    fprintf('Calling %s with %d input arguments (%s). \n',p.Results.mFile,numel(fieldnames(args)),strjoin(fieldnames(args),'/'));
+                    feval(p.Results.mFile,args);
                 end
             else
                 error('%s does not exist. Cannot run this task.',p.Results.mfile)
             end
-
         end
 
 
