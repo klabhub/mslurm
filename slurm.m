@@ -211,17 +211,22 @@ classdef slurm < handle
             if ischar(d)
                 d= {d};
             end
+
+            cwd =o.command("pwd");
             for i=1:numel(d)
-                result = o.command(['cd ' d{i} '; git pull origin']);
-                result = unique(result);
-                for j=1:numel(result)
-                    if isempty(result{j})
+                result =o.command(sprintf("test -d ''%s''",d{i}));
+                if result ~=0
+                    fprintf(2,"%s does not exist (%S). Could not gpo\n",d{i},result);
+                else
+                    result =o.command(sprintf("git --work-tree=%s --git-dir=%s/.git pull origin ;git --work-tree=%s submodule update --recursive",d{i},d{i},d{i},d{i}));
+                    if isempty(result)
                         warnNoTrace(['Nothing to update (' d{i} ')']);
                     else
-                        warnNoTrace(['Remote Git update ( ' d{i} '): ' result{j} ]);
+                        warnNoTrace(['Remote Git update ( ' d{i} '): ' result]);
                     end
                 end
             end
+            o.command(sprintf("cd ''%s''",cwd));
         end
 
         function [results,err] = command(o,cmd)
@@ -2337,7 +2342,7 @@ classdef slurm < handle
             % This code runs on the cluster in response to a job submitted
             % with batch. It does some sanity checks, loads any arguments
             % passed to batch, and passes those to the function as a
-            % struct.            
+            % struct.
             p =inputParser;
             p.addRequired('jobId')
             p.addRequired('taskNr')
@@ -2350,14 +2355,14 @@ classdef slurm < handle
 
             p.Results
 
-            
+
             if ismember(exist(p.Results.mFile),[2 3 5 6 ]) %#ok<EXIST>  % Executable file
                 fprintf('%s batch file found\n',p.Results.mFile)
-                
+
                 if ~isempty(p.Results,'argsFile')
                     if exist(p.Results.argsFile,"file")
                         fprintf('%s args file found\n',p.Results.argsFile)
-                        args = load(p.Results.argsFile);
+                        load(p.Results.argsFile,'args');
                     else
                         error('% argsFile not found.',p.Results.argsFile);
                     end
@@ -2390,9 +2395,9 @@ classdef slurm < handle
                 ws = whos;
                 if ~isempty(ws)
                     %Save the workspace
-                     slurm.saveResult('result.mat',result,p.Results.nodeTempDir,p.Results.jobDir);
-                     %else- no output, nothing to save
-                end                    
+                    slurm.saveResult('result.mat',result,p.Results.nodeTempDir,p.Results.jobDir);
+                    %else- no output, nothing to save
+                end
             else % A function with output that is now in the out cell array
                 slurm.saveResult(result.mat,result,p.Results.nodeTempDir,p.Results.jobDir);
 
