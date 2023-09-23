@@ -1,9 +1,19 @@
 % A class to interact with a remote SLURM cluster using SSH
 %
-% Depends on the SSH2 Package available on the Matlab FileExchange.
-% See readme.md for installation instructions and slurmExample for an
-% example.
+% This allows you to submit Matlab jobs to a SLURM scheduler, without using
+% the Matlab Parallel Server, by simply starting as many Matlab sessions as
+% you request. 
+% 
+% This works well for jobs that are "dumb parallel". I.e., the jobs do not 
+% need to talk to each other. If you need interjob communication , then you need MPS. 
+% The mpsSlurm repository has some code to interact with MPS on SLURM, but be warned that the nice features
+% of MPS come with the downside that bugs/errors/problems in your code are
+% very difficult to debug.). 
 %
+% This class uses the matlab-ssh2 package from David Freedman for its SSH2 communication.
+% The relevant code is included as a Git submodule to simplify installation.
+%
+% 
 % EXAMPLE:
 % Setup a connection to  a cluster
 % s =slurm;
@@ -2358,7 +2368,7 @@ classdef slurm < handle
 
             if ismember(exist(p.Results.mFile),[2 3 5 6 ]) %#ok<EXIST>  % Executable file
                 fprintf('%s batch file found\n',p.Results.mFile)
-                if ~isempty(p.Results,'argsFile')
+                if ~isempty(p.Results.argsFile)
                     if exist(p.Results.argsFile,"file")
                         fprintf('%s args file found\n',p.Results.argsFile)
                         load(p.Results.argsFile,'args');
