@@ -2343,16 +2343,16 @@ classdef slurm < handle
             p.parse(jobId,taskNr,varargin{:});
 
             if ismember(exist(p.Results.mFile),[2 3 5 6 ]) %#ok<EXIST>  % Executable file
-                fprintf('%s batch file found\m',p.Results.mFile)
+                fprintf('%s batch file found\n',p.Results.mFile)
                 if isfield(p.Results,'argsFile')
                     if exist(p.Results.argsFile,"file")
-                        fprintf('%s args file found\m',p.Results.argsFile)
-                        args = loag(p.Results.argsFile);
+                        fprintf('%s args file found\n',p.Results.argsFile)
+                        args = load(p.Results.argsFile);
                     else
                         error('% argsFile not found.',p.Results.argsFile);
                     end
                 else
-                    args =[];
+                    args =struct([]);
                 end
 
                 if nargin(p.Results.mFile)==0
