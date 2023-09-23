@@ -2294,7 +2294,7 @@ classdef slurm < handle
             warning backtrace on
             warning('mslurm:batchRun','Here we are');
             
-            if exist(p.Results.mFile,"file")
+            if ismember(exist(p.Results.mFile),[2 3 5 6 ]) %#ok<EXIST>  % Executable file
                 if nargin(p.Results.mFile)==0
                     % It is a script
                     eval(p.Results.mFile);
@@ -2303,7 +2303,7 @@ classdef slurm < handle
                     feval(p.Results.mFile,p.Results)
                 end
             else
-                error('%s does not exist. Cannot run this task.',mfileToRun)
+                error('%s does not exist. Cannot run this task.',p.Results.mfile)
             end
 
         end
