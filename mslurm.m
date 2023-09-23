@@ -2357,9 +2357,12 @@ classdef mslurm < handle
             if ismember(exist(p.Results.mFile),[2 3 5 6 ]) %#ok<EXIST>  % Executable file
                 fprintf('%s batch file found\n',p.Results.mFile)
                 if isempty(p.Results.argsFile)
-                    % Run as script
+                    % Run as script (workspace will be saved to results
+                    % file).
+                     fprintf('Calling %s without input arguments. \n',p.Results.mFile);                                
                      eval(p.Results.mFile);                        
                 else
+                    % It is a function, pass arguments struct
                     if exist(p.Results.argsFile,"file")
                         fprintf('%s args file found\n',p.Results.argsFile)
                         load(p.Results.argsFile,'args');
@@ -2368,6 +2371,7 @@ classdef mslurm < handle
                     end                              
                     % A function, pass the input args as a struct
                     fprintf('Calling %s with %d input arguments (%s). \n',p.Results.mFile,numel(fieldnames(args)),strjoin(fieldnames(args),'/'));                
+                    % Output of the function will be saved to results 
                     nout =nargout(p.Results.mFile);
                     result = cell(1,nout);
                     [result{:}]= feval(p.Results.mFile,args);      %#ok<NASGU>
@@ -2376,17 +2380,15 @@ classdef mslurm < handle
                 error('%s does not exist. Cannot run this task.',p.Results.mFile)
             end
 
-            %% Deal with the results
+            %% Save the results                       
+            % Make a struct with all variables in teh workspace
             ws = whos;
-            %Save the workspace
-            % Initialize a cell array to hold the variable values and names
             vars = struct;            
             for i = 1:length(ws)
                 vars.(ws(i).name)= eval(ws(i).name); % Store the variable value                
             end            
             % Save the result in the jobDir as 1.result.mat, 2.result.mat
-            mslurm.saveResult([num2str(p.Results.taskNr) '.result.mat'] ,vars,p.Results.nodeTempDir,p.Results.jobDir);
-            
+            mslurm.saveResult([num2str(p.Results.taskNr) '.result.mat'] ,vars,p.Results.nodeTempDir,p.Results.jobDir);           
         end
 
 
