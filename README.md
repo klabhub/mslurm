@@ -30,8 +30,7 @@ Clone the mslurm repository to the client.
 ```
 git clone https://github.com/klabhub/mslurm
 ```
-Remember the path (```'c:\github\mslurm'```)
-Add the mslurm folder to the Matlab search path on the client. Use 'Set Path' in the Matlab IDE or:
+Remember the path (```'c:\github\mslurm'```) where the toolbox was cloned. Add the folder to the Matlab search path on the client. Use 'Set Path' in the Matlab IDE or:
 ```matlab
 addpath('c:\github\mslurm')
 savepath
