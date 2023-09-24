@@ -14,7 +14,7 @@ Type the following command on a UNIX or Windows terminal on the client (On Windo
 ```
 ssh-keygen -t rsa -b 4096 -m PEM
 ```
-Accept the default location for the id_rsa file. Then, send your newly created key to the cluster. <NETID> should be replaced with the login name you use on the cluster.
+Accept the default location for the id_rsa file. Then, send your newly created key to the cluster. <NETID> should be replaced with your login name on the cluster.
  ```
 cat ~/.ssh/id_rsa.pub | ssh <NETID>@amareln.hpc.rutgers.edu 'cat >> .ssh/authorized_keys'
 ssh <NETID>@amareln.hpc.rutgers.edu "chmod 700 .ssh; chmod 640 .ssh/authorized_keys"
@@ -24,13 +24,13 @@ Clone the mslurm repository on  the server.
 ```bash
 ssh <NETID>@amareln.hpc.rutgers.edu "git clone https://github.com/klabhub/mslurm"
 ```
-Remember the path where the toolbox was installed. The command above puts it in  ```~/mslurm```.
+Remember the path where the toolbox was installed. The command above puts it in  `~/mslurm`.
 ### Client-side install.
 Clone the mslurm repository to the client.
 ```
 git clone https://github.com/klabhub/mslurm
 ```
-Remember the path (```'c:\github\mslurm'```) where the toolbox was cloned. Add the folder to the Matlab search path on the client. Use 'Set Path' in the Matlab IDE or:
+Remember the path (e.g., `c:\github\mslurm`) where the toolbox was cloned. Add the folder to the Matlab search path on the client. Use 'Set Path' in the Matlab IDE or:
 ```matlab
 addpath('c:\github\mslurm')
 savepath
@@ -50,28 +50,37 @@ This will ask for the following information:
 
 These preferences are unlikely to change frequently, but you can always update them by calling ```slurm.install``` again, or ```slurm.setpref``` to change one of these preferences. Each of these parameters can also be changed for the duration of a session by passing arguments to the constructor (see ```help slurm/slurm```).
 
-## Usage
-After completing the installation steps, open the GUI:
+## Usage - The mslurmApp
+After completing the installation steps, open the App:
 ```matlab
 mslurmApp
 ```
+The App shows which jobs have been submitted to the cluster, which are running, and which have failed. The app is also key for debugging as it gives you easy access to everything that was written to the command line window during the execution of a job. After selecting a job, press Ctrl-O, and a file with that information will open in the Matlab editor.  If your job is still running, this view in the editor will **not** update automatically, but you can press Ctrl-P to retrieve the latest copy of the command window from the cluster. Browse around the App to see what other information it provides (some of this will depend on the specifics of your SLURM installation).
 
-
+The app uses the preferences you set with `mslurm.install`. If you want to connect to a different cluster, or use  settings that are different from your saved preferences, you can create a mslurm object and open the app with that object. For instance:
+```
+cls =mslurm('host','hpc.fast.edu','keyfile','my_id_rsa')
+mslurmApp(cls)
+```
+## Usage - Creating and submitting jobs
+To submit jobs, you first create an mslurm object (this one uses the saved preferences): 
+```matlab
+cls = mslurm
+```
 
 The jobs posted to SLURM in each session typically share several parameters. You set these by assigning values to the mslurm object. 
 
 - **startupDirectory:** The folder where Matlab will start (this could be a place where your startup.m and pathdef.m live).
 - **workingDirectory:** The folder where the jobs will execute. If left unspecified (''), this will use a unique subfolder of the remoteStorage folder created for the job.
-- **addPath:** A string/char specifying the path that should be included on the cluster. This string will be passed to addpath() on the cluster.
-- **batchOptions:** A cell array of parameter/value pairs that are passed verbatim to the slurm sbatch command. See the (man page for sbatch for all options)[https://slurm.schedmd.com/sbatch.html]. These options are key to request the right kind of compute nodes for your job.
-- **runOptions:** A string/char that is passed verbatim to the ```srun``` command. You probably do not need this, but see the (man page)[https://slurm.schedmd.com/srun.html] for valid options.
+- **addPath:** A cell array of char specifying the path(s) that should be included on the cluster. This  will be passed to addpath() on the cluster.
+- **batchOptions:** A cell array of parameter/value pairs that are passed verbatim to the slurm sbatch command. See the (man page for sbatch for all options)[https://slurm.schedmd.com/sbatch.html]. These options are key to requesting the right kind of compute nodes for your job.
+- **runOptions:** A char that is passed verbatim to the ```srun``` command. You probably do not need this, but see the (man page)[https://slurm.schedmd.com/srun.html] for valid options.
 
 For example:
 ```matlab
-c.addPath = '/home/bart/mslurm'; % Making sure that the mslurm path is accessible on the cluster
+c.addPath = {'/home/bart/tools'}; % Make sure that my tools folder is  accessible on the cluster. 
 c.batchOptions = {'mem','32GB','time',30}; %Request workers with at least 32GB of memory and a wall time of 30 minutes. 
 ```
-
 
 
 
