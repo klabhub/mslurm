@@ -6,28 +6,50 @@ This is a toolbox to send Matlab jobs from your local machine (the client) to an
 *** Note that this toolbox does not use the Matlab Parallel Server. The disadvantage is that its many nice/useful features are not accessible. The advantage is that you don't need a MPS license. If you have an MPS license, then [kSlurm](https://github.com/klabhub/kSlurm) may be a better option for you. Although you should be warned that debugging code that runs through MPS is not for the faint of heart. ***
 
 ## Installation:
+Here are the necessary steps to get this toolbox to work. The examples use the Rutgers Amarel cluster, but this should work on any HPC cluster with the SLURM scheduler. 
 
-### Server side
+1. Authentication  setup
+An RSA key allows your local computer to set up a connection with the cluster without requiring you to enter your password.  The mslurm toolbox uses this to send commands from the client to the server.
+Type the following command on a UNIX or Windows terminal on the client (On Windows, use the PowerShell terminal, not the command prompt.):
+```
+ssh-keygen -t rsa -b 4096 -m PEM
+```
+Accept the default location for the id_rsa file. Then, send your newly created key to the cluster. <NETID> should be replaced with the login name you use on the cluster.
+ ```
+cat ~/.ssh/id_rsa.pub | ssh <NETID>@amareln.hpc.rutgers.edu 'cat >> .ssh/authorized_keys'
+ssh <NETID>@amareln.hpc.rutgers.edu "chmod 700 .ssh; chmod 640 .ssh/authorized_keys"
+```
+2. Server side install
+Clone the mslurm repository on  the server.
+```bash
+ssh <NETID>@amareln.hpc.rutgers.edu "git clone https://github.com/klabhub/mslurm"
+```
+Remember the path where the toolbox was installed. The command above puts it in  ```~/mslurm```.
+3. Client side install
 
-Clone the mslurm repository to the server.
-Add the mslurm directory to the Matlab search path on the server.
-
-### Client Side
 Clone the mslurm repository to the client.
-Add the mslurm directory to the Matlab search path on the client.
+```
+git clone https://github.com/klabhub/mslurm
+```
+Remember the path (```'c:\github\mslurm'```)
+Add the mslurm folder to the Matlab search path on the client. Use 'Set Path' in the Matlab IDE or:
+```matlab
+addpath('c:\github\mslurm')
+savepath
+```
 
-On the command line, type ```slurm.install``` to set up your preferences. 
+On the Matlab command line, type ```slurm.install``` to set up your preferences. 
 
-- **user:** The user name you use to connect to your HPC cluster
-- **keyFile:** The SSH private key you use to authenticate. 
-- **host:** The IP address or hostname of your cluster
-- **remoteStorage:** A folder on the host where files can be saved. This includes files used to start jobs on the cluster and the output of jobs running on the cluster. (E.g., something like /scratch/username/jobStorage/)
-- **localStorage:** A folder on the client where files can be saved. This is mainly used for files needed to start jobs. (e.g., /tmp or c:\temp)
+- **user:** The user name you use to connect to your HPC cluster (In the example this would be <NETID>)
+- **keyFile:** The SSH private key you use to authenticate.   (In the example this would be ~.ssh/id_rsa)
+- **host:** The IP address or hostname of your cluster. (In the example this would be amareln.hpc.rutgers.edu)
+- **remoteStorage:** A folder on the host where files can be saved. This includes files used to start jobs on the cluster and the output of jobs running on the cluster. (E.g., something like /scratch/<NETID>/mslurmStorage/)
+- **localStorage:** A folder on the client where files can be saved. This is mainly used for files needed to start jobs. (e.g., /tmp/mslurmStorage or c:\temp\mslurmStorage)
 - **nodeTempDir:** A folder that exists on all compute nodes. Intermediate job results will be written here. At the end of a job they are written to the headNodeDir. (e.g., /mnt/scratch or /tmp).
 - **headRootDir:** A folder that exists on the head node and from where you can retrieve the data. At the end of a job, results are written here.
-- **matlabRoot:**  The folder  where the Matlab executable lives on the cluster. If specified, mslurm starts matlab by executing the MatlabRoot/matlab command on the cluster. (If left empty, this only works if 'matlab' is on your path on the cluster.)
+- **matlabRoot:**  The folder  where the Matlab executable lives on the cluster. If specified, mslurm starts matlab by executing the MatlabRoot/matlab command on the cluster. (If left empty, this only works if 'matlab' is on your path on the cluster.). On the Amarel cluster this is '/opt/sw/packages/MATLAB/R2023a/bin' for the R2023a release. Other releases are available too. 
 
-These preferences are unlikely to change frequently, but you can always update them by calling ```slurm.install``` again, or ```slurm.setpref```. 
+These preferences are unlikely to change frequently, but you can always update them by calling ```slurm.install``` again, or ```slurm.setpref``` to change one of these preferences.
 
 ## Usage
 Once the preferences are set, you create a new mslurm object by calling the constructor:
