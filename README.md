@@ -8,7 +8,7 @@ This is a toolbox to send Matlab jobs from your local machine (the client) to an
 ## Installation:
 Here are the necessary steps to get this toolbox to work. The examples use the Rutgers Amarel cluster, but this should work on any HPC cluster with the SLURM scheduler. 
 
-###. Authentication  setup
+### Authentication  setup
 An RSA key allows your local computer to set up a connection with the cluster without requiring you to enter your password.  The mslurm toolbox uses this to send commands from the client to the server.
 Type the following command on a UNIX or Windows terminal on the client (On Windows, use the PowerShell terminal, not the command prompt.):
 ```
