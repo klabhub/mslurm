@@ -1,7 +1,7 @@
 function result = slurmDiagnose(options)
 % Utility function to run diagnostics on the server. Run this with
 % slurm.feval and then look at the result with slurm.retrieve or inspect
-% the logs from the sortGui.
+% the logs from the slurmApp.
 % The options are (a cell array of) strings that describe what will be
 % done:
 %  'basic' : some general diagnostics about the node where Matlab runs

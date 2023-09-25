@@ -2,21 +2,30 @@
 %
 % This allows you to submit Matlab jobs to a SLURM scheduler, without using
 % the Matlab Parallel Server, by simply starting as many Matlab sessions as
-% you request. 
-% 
-% See README.md for installation and instructions.
-% 
-% See also slurmApp.
+% you request.
+%
+% See README.md for installation and usage instructions.
+%
+% Key functions for the user are
+%   batch() - Run a script (or function with some parm/value pairs) N times in parallel.
+%   feval()  - Analyze each of the rows of an array of data with the same function.
+%   fileInFileOut() - Given a list of files, analyze each file.
+%   taskBatch() - Similar to feval() but with options to
+%                       retry/continue/reuse previously uploaded data.
+%
+% See also slurmApp for a graphical interface to the jobs running on the
+% cluster.
 %
 % BK - Jan 2015
 % June 2017 - Public release.
 % Sept 2023 - Update.
 
+%#ok<*ISCLSTR>
 classdef mslurm < handle
 
     properties (Constant)
         PREFGRP = "mSlurm"  % Group that stores string preferences for slurm
-        PREFS   = ["user","keyfile","host","remoteStorage","localStorage", "matlabRoot","nodeTempDir","headRootDir"];
+        PREFS   = ["user","keyfile","host","remoteStorage","localStorage", "matlabRoot","nodeTempDir","headRootDir","mslurmFolder"];
     end
 
     properties (SetAccess=public, GetAccess=public)
@@ -27,6 +36,7 @@ classdef mslurm < handle
         user                = ''; % Remote user name
         keyfile             = ''; % Name of the SSH key file. (full name)
         matlabRoot          = ''; % Matlab root on the cluster.
+        mslurmFolder        = ''; % Folder where this mslurm toolbox is installed on the cluster.
 
         %% Session defaults (can be overruled when submitting specific jobs).
         nodeTempDir         = '';  % The path to a directory on a node that can be used to save data temporarily (e.g. /scratch/)
@@ -37,9 +47,6 @@ classdef mslurm < handle
         batchOptions        = {}; % Options passed to sbatch (parm,value pairs)
         runOptions          = ''; % Options passed to srun
 
-        %% Other
-        from                = now - 1; % Retrieve logs from this time (use datenum format)
-        to                  = Inf; % Until this time.        
     end
 
     properties (Dependent,SetAccess=protected)
@@ -81,17 +88,14 @@ classdef mslurm < handle
             % All other jobs have a state that corresponds to the
             % cumulative number of attempts.
 
-           failedStates = {'CANCELLED','FAILED','NODE_FAIL','PREEMPTED','SUSPENDED','TIMEOUT'};
+            failedStates = {'CANCELLED','FAILED','NODE_FAIL','PREEMPTED','SUSPENDED','TIMEOUT'};
             %notFailedStates = {'COMPLETED','CONFIGURING','COMPLETING','PENDING','RUNNING','RESIZING'};
 
             % Find the failed jobs
-            allFailures = ~strcmpi('0:0',{o.jobs.ExitCode});
             states = {o.jobs.State};
-            for i=1:length(failedStates)
-                allFailures = allFailures | strncmpi(failedStates{i},states,length(failedStates{i}));
-            end
-
             jobNames = {o.jobs.JobName};
+            allFailures = ~strcmpi('0:0',{o.jobs.ExitCode}) | ismember(states,failedStates);
+
             state = double(allFailures);
             inProgress = ~cellfun(@isempty,regexp(states,'ING\>'));
             state(inProgress) = -2;
@@ -101,7 +105,7 @@ classdef mslurm < handle
                 if sum(thisJob)>1
                     % tried more than once.
                     thisFails = allFailures(thisJob);
-                    nrFails = cumsum(thisFails);
+                    nrFails = sum(thisFails);
                     if thisFails(end)==0 % Last was not a failure
                         state(thisJob & allFailures)    = -1;
                         state(thisJob(end))             = 0;
@@ -142,11 +146,22 @@ classdef mslurm < handle
                 pv.localStorage (1,1) string = mslurm.getpref('localStorage');
                 pv.nodeTempDir (1,1) string = mslurm.getpref('nodeTempDir');
                 pv.headRootDir (1,1) string = mslurm.getpref('headRootDir');
+                pv.mslurmFolder (1,1) string = mslurm.getpref('mslurmFolder');
             end
             % Constructor.
+
+            % Add the SSH2 submodule to the search path (skipped if the user
+            % already has ssh2 on the path.)
             if isempty(which('ssh2'))
-                error('Please install SSH2 from the FileExchange on Matlab Central (or add it to your path)');
+                here =fileparts(mfilename('fullpath'));
+                addpath(fullfile(here,'matlab-ssh2','ssh2'));
             end
+            ssh2Install = fileparts(which('ssh2'));
+            jarName = strrep(fullfile(ssh2Install,'ganymed-ssh2-build250','ganymed-ssh2-build250.jar'),'\','/');
+            if ~exist(jarName,'file')
+                error('Could not load the SSH2 java file. Please check your matlab-ssh2 installation.')
+            end
+            javaaddpath(jarName);
             % Setup the object with saved prefs, overruled by session specific
             % input arguments to the constructor
             o.host= char(pv.host);
@@ -157,7 +172,9 @@ classdef mslurm < handle
             o.localStorage = char(pv.localStorage);
             o.nodeTempDir  = char(pv.nodeTempDir);
             o.headRootDir = char(pv.headRootDir);
+            o.mslurmFolder= char(pv.mslurmFolder);
         end
+
 
         function delete(o)
             % Destructor. Makes sure we close the SSH connection
@@ -182,66 +199,78 @@ classdef mslurm < handle
             v = str2double(v);
         end
 
-        function gitpull(o,d)
+        function gitpull(o,folders,pv)
             % Convenience function to pull a remote git repo from the
             % origin (typially used to sync local code development with
-            % remote execution).
+            % remote execution). Note that submodules will alsobe updated
+            % using submodule update --recursive.
+            %
             % INPUT
-            % d - The folder with a git repo on the cluster. Or a cell
-            % array with such folder names.
-            hasGit = o.command('which git');
-            if isempty(hasGit{1})
-                fprintf('*****************************************************************'\m);
-                warnNoTrace('***The remote cluster does not have git installed... your code will not be pulled.***');
-                fprintf('*****************************************************************\n');
-            end
-            if ischar(d)
-                d= {d};
+            % folders  - The folder with a git repo on the cluster. Or a cell
+            % array with such folder names. 
+            % 'submodules' [false] Set this to true to update submodules recursively with git submodule update --recursive
+            %                   Note that in this case the folders have to
+            %                   be the toplevel of the git repo.
+            % 
+            arguments 
+                o (1,1) mslurm
+                folders (1,:) 
+                pv.submodules (1,1) logical = false
             end
 
-            cwd =o.command("pwd");
-            for i=1:numel(d)
-                result =o.command(sprintf("test -d ''%s''",d{i}));
-                if result ~=0
-                    fprintf(2,"%s does not exist (%S). Could not gpo\n",d{i},result);
-                else
-                    result =o.command(sprintf("git --work-tree=%s --git-dir=%s/.git pull origin ;git --work-tree=%s submodule update --recursive",d{i},d{i},d{i},d{i}));
-                    if isempty(result)
-                        warnNoTrace(['Nothing to update (' d{i} ')']);
-                    else
-                        warnNoTrace(['Remote Git update ( ' d{i} '): ' result]);
-                    end
-                end
+            if ischar(folders)
+                folders= {folders};
             end
-            o.command(sprintf("cd ''%s''",cwd));
+            for i=1:numel(folders)
+                if pv.submodules
+                    % This sumodule update will only work if the folder is the root folder
+                    % of the git repo.
+                    cmd =sprintf('cwd= ${pwd} && cd %s && git pull origin && git submodule update --recursive && cd $cwd',folders{1});
+                else
+                    % This will work from anywhere in the repo
+                     cmd =sprintf('cwd= ${pwd} && cd %s && git pull origin && cd $cwd',folders{1});
+                end
+                result = o.command(cmd);
+                mslurm.log('%s - %s',folders{i}, strjoin(result,'\n'))
+            end
+
         end
 
-        function [results,err] = command(o,cmd)
+        function [results,err] = command(o,cmd,varargin)
+            if nargin>2
+                cmd = sprintf(cmd,varargin{:});
+            end
             % Execute an arbitrary UNIX command on the cluster.
             if ~isempty(o.ssh)
-                USESSHERR = false; % If you have the klab SSH fork it returns err messages for debugging. Otherwise keep this as false.
-                if USESSHERR
-                    [o.ssh,results,err] = ssh2_command(o.ssh,cmd); %#ok<UNRCH>
-                else
-                    err= 'unknonwn error';
-                    try
-                        [o.ssh,results] = ssh2_command(o.ssh,cmd);
-                    catch me
-                        if any(ismember({me.stack.name},'mslurm.connect'))
-                            % Avoid recursion.
-                            rethrow(me)
-                        else
-                            % Try to reconnect once.
-                            warnNoTrace('SSH error. Trying to reconnect');
-                            connect(o);
-                            [o.ssh,results] = ssh2_command(o.ssh,cmd);
+                USESSHERR = nargout('ssh2_command'); % If you have the klab SSH fork it returns err messages for debugging. Otherwise keep this as false.
+                try
+                    if USESSHERR
+                        [o.ssh,results,err] = ssh2_command(o.ssh,cmd);
+                        if ~isempty(err{1})
+                            fprintf('The %s command generated the following errors:\n %s',cmd,strjoin(err,'\n'));
                         end
+                    else
+                        err= {'unknonwn error'};
+                        [o.ssh,results] = ssh2_command(o.ssh,cmd);
+                    end
+                catch me
+                    if any(ismember({me.stack.name},'mslurm.connect'))
+                        % Avoid recursion.
+                        rethrow(me)
+                    else
+                        % Try to reconnect once.
+                        mslurm.log('SSH error. Trying to reconnect');
+                        connect(o);
+                        [o.ssh,results] = ssh2_command(o.ssh,cmd);
+                        mslurm.log('Reconnected.')
                     end
                 end
+
             else
-                warnNoTrace('Not connected...')
+                mslurm.log('Not connected...')
                 results = {''};
             end
+
         end
 
         function yesno = exist(o,file,mode)
@@ -266,6 +295,10 @@ classdef mslurm < handle
             % The remote directory is created if it does not already exist.
             % filename = The full path to the file to be copied
             % remoteDir = the name of the remote directory [o.remoteStorage]
+
+            if ~exist(filename,'file')
+                error('Local file %s not found. Cannot copy to cluster.',filename)
+            end
             [localPath,filename,ext] = fileparts(filename);
             filename = [filename ext];
             if nargin<3
@@ -277,7 +310,7 @@ classdef mslurm < handle
             try
                 o.ssh = scp_put(o.ssh,filename,remoteDir,localPath,filename);
             catch
-                warnNoTrace('SSH error. Trying to reconnect');
+                mslurm.log('SSH error. Trying to reconnect');
                 connect(o);
                 o.ssh = scp_put(o.ssh,filename,remoteDir,localPath,filename);
             end
@@ -296,19 +329,19 @@ classdef mslurm < handle
                     end
                 end
             end
-            disp('Starting data transfer...')
+            mslurm.log('Starting data transfer...')
             try
                 o.ssh = scp_get(o.ssh,files,localJobDir,remoteJobDir);
             catch
-                warnNoTrace('SSH error. Trying to reconnect');
+                mslurm.log('SSH error. Trying to reconnect');
                 connect(o)
                 o.ssh = scp_get(o.ssh,files,localJobDir,remoteJobDir);
             end
-            disp('Data transfer done.')
+            mslurm.log('Data transfer done.')
 
             %% cleanup if requested
             if deleteRemote
-                disp('Deleting remote files')
+                mslurm.log('Deleting remote files')
                 o.command(['cd ' remoteJobDir ]);
                 for i=1:numel(files)
                     o.command([' rm ' files{i} ]);
@@ -349,7 +382,6 @@ classdef mslurm < handle
             %  T = table with the smap info
             % msg = warning message
 
-
             if nargin <2
                 options ='';
             end
@@ -364,9 +396,8 @@ classdef mslurm < handle
             end
             localFile = fullfile(o.localStorage,filename);
             if nargout ==0
-                warnNoTrace(msg);
+                mslurm.log(msg);
                 edit(localFile);
-
             else
                 T = readtable(localFile);
             end
@@ -374,16 +405,15 @@ classdef mslurm < handle
         end
 
         function results = retrieve(o,tag,varargin)
-            % Retrieve the results generated by feval from the cluster
+            % Retrieve the results generated by feval or batch from the cluster
             % The output argument is a cell array with the output of
             % the users' mfile. Jobs that failed will have an empty element
             % in the array. The order of results is the same as the order
             % of the data provided to the mfile in the call to mslurm.feval.
             %
             % tag = the tag (unique id) that identifies the job (returned
-            % by mslurm.feval)
+            % by mslurm.feval and mslurm.batch)
             %
-            % Pressing the 'g' key in the slurmGUI calls this function
             %
             % Parm/value
             %  'partial'  - set to true to retrieve results even if some
@@ -395,7 +425,6 @@ classdef mslurm < handle
             % function). [true]
             % 'checkSacct' - Check the accounting log on SLURM to get
             % information on completed/failed jobs.
-
             p=inputParser;
             p.addParameter('partial',true); % Allow partial result retrieval.
             p.addParameter('deleteRemote',true); % Remove the results from the cluster (after copying)
@@ -407,23 +436,23 @@ classdef mslurm < handle
                 o.sacct; % Update accounting
                 state = o.failState; %0 = success, -1 = success after failing, -2 = running, >0= number of attempts.
                 thisJob = strcmpi(tag,{o.jobs.JobName});
-               nrRunning = sum(state(thisJob)==-2);
+                nrRunning = sum(state(thisJob)==-2);
                 nrFailed  = sum(state(thisJob)>0);
                 nrSuccess  =sum(ismember(state(thisJob),[0 -1]));
 
                 if nrFailed >0
-                    warnNoTrace([num2str(nrFailed) ' jobs failed']);
+                    mslurm.log([num2str(nrFailed) ' jobs failed']);
                 end
 
                 if nrRunning >0
-                    warnNoTrace([num2str(nrRunning) ' jobs still running']);
+                    mslurm.log([num2str(nrRunning) ' jobs still running']);
                 end
                 if nrSuccess >0
-                    warnNoTrace ([num2str(nrSuccess) ' jobs completed sucessfully']);
+                    mslurm.log ([num2str(nrSuccess) ' jobs completed sucessfully']);
                 end
 
                 if ~p.Results.partial && nrRunning >0
-                    warnNoTrace([num2str(nrRunning) ' jobs are still running. Let''s wait a bit...']);
+                    mslurm.log([num2str(nrRunning) ' jobs are still running. Let''s wait a bit...']);
                     return
                 end
             end
@@ -441,7 +470,7 @@ classdef mslurm < handle
                 end
                 get(o,files,localJobDir,remoteJobDir);
             else
-                warnNoTrace(['No files in job directory: ' remoteJobDir]);
+                mslurm.log(['No files in job directory: ' remoteJobDir]);
                 return;
             end
 
@@ -467,7 +496,7 @@ classdef mslurm < handle
             if p.Results.deleteLocal
                 [success,message]= rmdir(localJobDir,'s');
                 if ~success
-                    warnNoTrace(['Could not delete the local job directory: ' localJobDir ' (' message ')']);
+                    mslurm.log(['Could not delete the local job directory: ' localJobDir ' (' message ')']);
                 end
             end
         end
@@ -596,8 +625,14 @@ classdef mslurm < handle
         function jobName = batch(o,fun,varargin)
             % Evaluate the mfile (fun) in each of the 'nrWorkers'
             %
-            % The mfile fun should be a function that takes
+            % The mfile can be a script or a function that takes
             % parameter/value pairs specified in the call to fun as its input.
+            %
+            % You can also specify fun as a matlab expression containing multiple
+            % commands. mlsurm.batch will then execute the expression on
+            % the workers on the cluster. To help you keep track, you
+            % should specify 'expressionName' to give a helpful name to the
+            % expression (and from that, the name of the job on SLURM).appde
             %
             % The following parm/value pairs control SLURM scheduling and
             % are not passed to the function. Some of these have default
@@ -614,27 +649,28 @@ classdef mslurm < handle
             %
             % 'workingDirectory' Define the working directory.
             % 'addPath' - Add this cell array of paths to the path on the cluster
-            %
+            % 'nrWorkers'  - The number of workers that should execute this
+            %               function.
             % To retrieve the output each of the evaluations of fun, this
             % funciton returns a unique 'tag' that can be passed to
             % mslurm.retrieve().
             %
-            %
-
-
             p=inputParser;
+            p.addRequired('o');
+            p.addRequired('fun',@(x) ischar(x) || isstring(x));
             p.addParameter('batchOptions',o.batchOptions,@iscell);
             p.addParameter('runOptions',o.runOptions,@ischar);
             p.addParameter('debug',false,@islogical);
             p.addParameter('copy',false,@islogical);
             p.addParameter('startupDirectory',o.startupDirectory,@ischar);
             p.addParameter('workingDirectory',o.workingDirectory,@ischar);
-            p.addParameter('addPath',o.addPath,@(x) ischar(x) ||iscellstr(x));
+            p.addParameter('addPath',o.addPath,@(x) ischar(x) ||iscellstr(x) );
             p.addParameter('nrWorkers',1);
+            p.addParameter('expressionName','expression');
             p.KeepUnmatched = true;
-            p.parse(varargin{:});
+            p.parse(o,fun,varargin{:});
 
-             if ischar(p.Results.addPath)
+            if ischar(p.Results.addPath)
                 addPth = {p.Results.addPath};
             else
                 addPth = p.Results.addPath;
@@ -642,16 +678,23 @@ classdef mslurm < handle
             % Name the job after the current time. Assuming this will be
             % unique.
             uid = char(datetime("now",'Format','yy.MM.dd_HH.mm.SS.sss'));
-            if ~ischar(fun)
-                error('The fun argument must be the name of an m-file');
-            end
 
+            if contains(fun,{'(',';',','})
+                % This is an expression not an mfile. Create a temporary
+                mfilename =fullfile(tempdir,[p.Results.expressionName '.m']);
+                fid = fopen(mfilename,'w');
+                fprintf(fid,'%s\n',fun);
+                fclose(fid);
+                fun =p.Results.expressionName;
+                copy = true; % Have to copy
+            else
+                mfilename = which(fun);
+                copy = p.Results.copy;
+            end
             jobName =[fun '-' uid];
             jobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
             % Create a (unique) directory on the head node to store data and results.
             result = o.command(['mkdir ' jobDir]); %#ok<NASGU>
-            
-
 
             %% Find the unmatched and save as input arg.
             if ~isempty(fieldnames(p.Unmatched))
@@ -667,9 +710,8 @@ classdef mslurm < handle
                 remoteArgsFile ='';
             end
 
-            if p.Results.copy
+            if copy
                 % Copy the mfile to remote storage.
-                mfilename = which(fun);
                 o.put(mfilename,jobDir);
                 addToPath = cat(2,addPth,jobDir);
             else
@@ -757,19 +799,6 @@ classdef mslurm < handle
             % results{10} = rand(10);
             %
             %
-            % EXAMPLE
-            % The pctdemo_task_blackjack function takes two input
-            % arguments, the number of hands to play, and how often to
-            % repeat this. To play 100 hands 1000 times on 3 nodes, use:
-            %  data = [100 1000; 100 1000; 100 1000];
-            % Each worker will receive one row of this matrix as the input
-            % to the blackjack function. The item in the first column as the first input
-            % argument, the item in the second column as the second input argument.
-            % tag = o.feval('pctdemo_task_blackjack',data,'copy',true);
-            % results  = o.retrieve(tag);  % Once it is done, use this to
-            % retrieve the (3) results.
-            %
-
 
             % Name the job after the current time. Assuming this will be
             % unique.
@@ -822,7 +851,7 @@ classdef mslurm < handle
             p.addParameter('addPath',o.addPath,@(x) iscellstr(x) || ischar(x));
             p.KeepUnmatched = true;
             p.parse(varargin{:});
-             if ischar(p.Results.addPath)
+            if ischar(p.Results.addPath)
                 addPth = {p.Results.addPath};
             else
                 addPth = p.Results.addPath;
@@ -912,10 +941,10 @@ classdef mslurm < handle
                 %this option is reserved for referencing previously submitted jobs
                 %to re-use data that already exists on the cluster
                 if ~isequal(sum(isletter(data)),0)
-                    warnNoTrace(['checking whether data from the job with the name: "' data '" still exists...'])
+                    mslurm.log(['checking whether data from the job with the name: "' data '" still exists...'])
                     dataType = 'jobName';
                 elseif isequal(sum(isletter(data)),0)
-                    warnNoTrace(['checking whether data from the job with the ID: "' data '" still exists...'])
+                    mslurm.log(['checking whether data from the job with the ID: "' data '" still exists...'])
                     dataType = 'jobID';
                 end
 
@@ -972,14 +1001,15 @@ classdef mslurm < handle
 
             %check if 'data' is real data or if it just refers to an already existing dataset
             switch dataType
-                case 'jobID' %if we only know the jobID, then we need to find the actual jobName to find out what folder the data got uploaded to for that previous job
-                    tempSelector = slurmSelector('gui', false, 'from', now-p.Results.from);
-                    allJobIDs = {tempSelector.jobs.JobID};
+                case 'jobID' %if we only know the jobID, then we need to find the jobName to find out what folder the data got uploaded to for that previous job
+                    tempCluster = mslurm; % Get the default mslurm
+                    tempCluster.sacct('starttime',datetime("now")-p.Results.from); %Update sacct
+                    allJobIDs = {tempCluster.jobs.JobID};
                     targetJobIDIdx = find(contains(allJobIDs,data));
                     if isempty(targetJobIDIdx)
                         error(['No job with the ID ' data ' could be found within the last ' num2str(p.Results.from) ' days'])
                     end
-                    allJobNames = {tempSelector.jobs.JobName};
+                    allJobNames = {tempCluster.jobs.JobName};
                     targetJobName = allJobNames{targetJobIDIdx(1)};
                     targetJobFolder = strrep(fullfile(o.remoteStorage,erase(targetJobName,'-taskBatch'),'/'),'\','/');
                     remoteDataFile = [targetJobFolder erase(targetJobName,'-taskBatch') '_data.mat'];
@@ -1007,7 +1037,7 @@ classdef mslurm < handle
                     if ~o.exist([targetJobFolder erase(targetJobName,'-taskBatch') '_data.mat'])
                         error(['the data file "' erase(targetJobName,'-taskBatch') '_data.mat"  does not exist anymore. You need to upload data for your job']);
                     else
-                        warnNoTrace('... data found')
+                        mslurm.log('... data found')
                     end
                 else
                     error(['the folder "' targetJobFolder '"  does not exist anymore. You need to upload data for your job']);
@@ -1040,7 +1070,7 @@ classdef mslurm < handle
                     %this might be problematic if the same function will run on future jobs
                     %because those separete results will be hard to distinguish
                     finalFolderName =  [getenv('USERNAME') '/' fun '_' uid '/'];
-                    warnNoTrace('consider specifying either "jobName" or "outputFolder" or both so make your job and/or the folder where the results be saved more distinguishable. In particular if you are going to use this function for future but different jobs')
+                    mslurm.log('consider specifying either "jobName" or "outputFolder" or both so make your job and/or the folder where the results be saved more distinguishable. In particular if you are going to use this function for future but different jobs')
                 end
             end
 
@@ -1186,7 +1216,7 @@ classdef mslurm < handle
             % of parameters  from the file that should be used for a particular
             % matlab session on the cluster.
             %
-            % See also mslurm/feval for an example function that uses
+            % See also mslurm/feval or mslurm.batch for example functions that use
             % mslurm/sbatch to submit jobs to the scheduler.
 
             p = inputParser;
@@ -1231,7 +1261,7 @@ classdef mslurm < handle
                     else
                         sd = '';
                     end
-                    addPth =strjoin(addPth,':');
+                    addPth =strjoin(cat(2,addPth,o.mslurmFolder),':');
                     if ~isempty(addPth)
                         addPathStr = sprintf('addpath(''%s'')',addPth);
                     else
@@ -1246,11 +1276,11 @@ classdef mslurm < handle
                         wd = p.Results.workingDirectory;
                     end
                     if p.Results.nrInArray>=1
-                        runStr = ['matlab  ' sd ' -nodisplay -nodesktop -r  "try;%s;cd ''%s'';%s($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID %s);catch me;mslurm.exit(me);end;mslurm.exit(0);"'];
-                        run = sprintf(runStr,addPathStr,wd,p.Results.mfile,extraIn);
+                        runStr = ['%s/matlab  ' sd ' -nodisplay -nodesktop -r  "try;%s;cd ''%s'';%s($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID %s);catch me;mslurm.exit(me);end;mslurm.exit(0);"'];
+                        run = sprintf(runStr,o.matlabRoot,addPathStr,wd,p.Results.mfile,extraIn);
                     else
-                        runStr = ['matlab ' sd ' -nodisplay -nodesktop -r "try;%s;cd ''%s''; %s($SLURM_JOB_ID,%d %s);catch me;mslurm.exit(me);end;mslurm.exit(0);"'];
-                        run = sprintf(runStr,addPathStr,wd,p.Results.mfile,p.Results.taskNr,extraIn);
+                        runStr = ['%s/matlab ' sd ' -nodisplay -nodesktop -r "try;%s;cd ''%s''; %s($SLURM_JOB_ID,%d %s);catch me;mslurm.exit(me);end;mslurm.exit(0);"'];
+                        run = sprintf(runStr,o.matlabRoot,addPathStr,wd,p.Results.mfile,p.Results.taskNr,extraIn);
                     end
                 elseif ~isempty(p.Results.command)
                     % The user knows what to do. Run this command as is with srun.
@@ -1297,7 +1327,7 @@ classdef mslurm < handle
                         isSpace  = batchOpts{opt+1}==' ';
                         if any(isSpace)
                             batchOpts{opt+1}(isSpace) = '';
-                            warnNoTrace(['Removing spaces from Slurm Batch Option ''' batchOpts{opt} ''' now set to:''' batchOpts{opt+1} '''']);
+                            mslurm.log(['Removing spaces from Slurm Batch Option ''' batchOpts{opt} ''' now set to:''' batchOpts{opt+1} '''']);
                         end
                         fprintf(fid,'#SBATCH --%s=%s\n',batchOpts{opt},batchOpts{opt+1});
                     else
@@ -1317,7 +1347,7 @@ classdef mslurm < handle
             end
 
             if p.Results.debug
-                warnNoTrace ('Debug mode. Nothing will be submitted to SLURM')
+                mslurm.log ('Debug mode. Nothing will be submitted to SLURM')
                 edit (fullfile(o.localStorage,batchFile));
                 jobId=0;result = 'debug mode';
             else
@@ -1329,9 +1359,9 @@ classdef mslurm < handle
                 [result,err] = o.command(sprintf('cd %s ;sbatch %s/%s',o.remoteStorage,o.remoteStorage,batchFile));
                 jobId = str2double(regexp(result{1},'\d+','match'));
                 if isempty(jobId) || isnan(jobId)
-                    warnNoTrace(['Failed to submit ' jobName ' (Msg=' result{1} ', Err: ' err{1} ' )']);
+                    mslurm.log(['Failed to submit ' jobName ' (Msg=' result{1} ', Err: ' err{1} ' )']);
                 else
-                    warnNoTrace(['Successfully submitted ' jobName ' (JobID=' num2str(jobId) ')']);
+                    mslurm.log(['Successfully submitted ' jobName ' (JobID=' num2str(jobId) ')']);
                 end
             end
         end
@@ -1350,7 +1380,7 @@ classdef mslurm < handle
             end
             cmd = ['scancel ' sprintf('%s ',jobIds{:})];
             result = o.command(cmd);
-            %warnNoTrace(result{1})
+            %mslurm.log(result{1})
         end
 
 
@@ -1377,7 +1407,7 @@ classdef mslurm < handle
 
             if o.nrJobs==0
                 list = {};
-                warnNoTrace('No jobs found')
+                mslurm.log('No jobs found')
             else
                 if isempty(p.Results.jobId)
                     state = o.failState;
@@ -1437,7 +1467,7 @@ classdef mslurm < handle
                     %only one taskBatch should be retried at a time
                     uTaskBatch = unique(list);
                     if length(uTaskBatch)>1
-                        fprintf(2,'Sorry, only retry one taskBatch at a time. Please retry separately. \n');
+                        mslurm.log('Sorry, only retry one taskBatch at a time. Please retry separately. \n');
                     else
 
                         if isTaskBatchCollate
@@ -1608,9 +1638,9 @@ classdef mslurm < handle
                                     end
 
                                 case 'Cancel'
-                                    fprintf(2,'Nothing to submit then. \n');
+                                    mslurm.log('Nothing to submit then. \n');
                                 otherwise
-                                    fprintf(2,'Nothing to submit then. \n');
+                                    mslurm.log('Nothing to submit then. \n');
 
                             end
                         end
@@ -1704,7 +1734,6 @@ classdef mslurm < handle
 
 
         function [T]=jobsTable(o,expression)
-
             % Often jobs belong together in a group. By using convention
             % jobName =  Job-SubJob, the 'group' (job) and its elements (subjob)
             % can be determined from the jobName. This is used by mslurmApp to make the
@@ -1801,7 +1830,7 @@ classdef mslurm < handle
                         else
                             msg{i} = ['File does not exist: ' remoteName];
                             if nargout <2
-                                warnNoTrace(msg{i});
+                                mslurm.log(msg{i});
                             end
                         end
                     end
@@ -1818,6 +1847,15 @@ classdef mslurm < handle
 
         end
 
+        function sinfo(o,args)
+            % Call sinfo on the cluster. Command line args can be specified
+            arguments
+                o (1,1) mslurm
+                args (1,:) {mustBeText} = '--format "%12P %.5a %.10l %.16F %m %20N"'
+            end
+            results = o.command(['sinfo ' args]);
+            disp(strcat(results))
+        end
 
         function [data,elapsed] = sacct(o,varargin)
             % Retrieve slurm accounting data from the cluster.
@@ -1855,8 +1893,8 @@ classdef mslurm < handle
             p.addParameter('user',o.user,@ischar);
             p.addParameter('units','G',@(x)(strcmp(x,'G') | strcmp(x,'K')));
             p.addParameter('format','jobId,State,ExitCode,jobName,Comment,submit',@ischar);
-            p.addParameter('starttime',o.from,@(x)(ischar(x) || isnumeric(x) ||isdatetime(x)));
-            p.addParameter('endtime',o.to,@(x)(ischar(x) || isnumeric(x) || isdatetime(x)));
+            p.addParameter('starttime',datetime("now")-1, @isdatetime);
+            p.addParameter('endtime',datetime("now") +1, @isdatetime);
             p.addParameter('removeSteps',true,@islogical);
             p.parse(varargin{:});
 
@@ -1875,29 +1913,6 @@ classdef mslurm < handle
                 end
                 jobIdStr = sprintf('--jobs=%s ', jobIds{:});
             end
-
-            if isdatetime(p.Results.endtime)
-                endTime = datenum(p.Results.endtime);
-            else
-                endTime = p.Results.endtime;
-            end
-
-            if isdatetime(p.Results.starttime)
-                startTime = datenum(p.Results.starttime);
-            else
-                startTime = p.Results.starttime;
-            end
-
-
-            if isinf(endTime)
-                endTime = now+1;
-            else
-                endTime = max(startTime+1,endTime);
-            end
-
-
-            o.from  = startTime;
-            o.to = endTime;
 
             if ~isempty(strfind(upper(p.Results.format),'SUBMIT')) %#ok<STREMP>
                 format = p.Results.format;
@@ -1918,8 +1933,7 @@ classdef mslurm < handle
             % not show at all. Of course without endTime there is no way to
             % zoom in on a specific set of days. Currently favoring showing
             % more, rather than less.
-            %cmd  = ['sacct  --parsable2 --format=' format '  ' jobIdStr userCmd ' --starttime=' datestr(p.Results.starttime,'yyyy-mm-ddTHH:MM:SS') ' --endtime=' datestr(endTime,'yyyy-mm-ddTHH:MM:SS')];
-            cmd  = ['sacct  --parsable2 --format=' format '  ' jobIdStr userCmd ' --starttime=' mslurm.slurmTime(startTime) ' --units=' p.Results.units];
+            cmd  = ['sacct  --parsable2 --format=' format '  ' jobIdStr userCmd ' --starttime=' mslurm.slurmTime(p.Results.starttime) ' --units=' p.Results.units];
             results = o.command(cmd);
             if length(results)>1
                 fields = strsplit(results{1},'|');
@@ -1928,7 +1942,7 @@ classdef mslurm < handle
                     data(j) = cell2struct(thisData,fields,2); %#ok<AGROW>
                 end
 
-                elapsed = datetime(datestr(mslurm.matlabTime(data(end).Submit),0),'InputFormat','dd-MMM-yyyy HH:mm:SS')-datetime(datestr(mslurm.matlabTime(data(1).Submit),0),'InputFormat','dd-MMM-yyyy HH:mm:SS');
+                elapsed = mslurm.matlabTime(data(end).Submit)-mslurm.matlabTime(data(1).Submit);
                 elapsed.Format = 'h';
                 if p.Results.removeSteps
                     % Remove the jobs that seem to be part of the jobs that I
@@ -1957,7 +1971,7 @@ classdef mslurm < handle
 
                 end
             else
-                %warnNoTrace(['No sacct information was found for ' jobIdStr '(command = ' cmd ')']);
+                mslurm.log(['No sacct information was found for ' jobIdStr '(command = ' cmd ')']);
                 data =[];
                 elapsed = duration(0,0,0);
                 elapsed.Format = 'h';
@@ -1998,25 +2012,42 @@ classdef mslurm < handle
         end
     end
 
+
+
     %% Static helper function
     methods (Static)
+        function log(msg,varargin)
+            % Writes a message to the command line and adds a clickable link to the relevant line in the m file that generated the message.
+            [st] = dbstack('-completenames');
+            if length(st)>1
+                fun = st(2).name;
+                line = st(2).line;
+                file = st(2).file;
+            else
+                fun = 'base';
+                file = '';
+                line = 0;
+            end
+            fprintf([msg '\t\t (<a href="matlab:matlab.desktop.editor.openAndGoToLine\t(''%s'',%d);">%s@line %d</a>)\n' ],varargin{:},file,line,fun,line);
+        end
+
         function T = slurmTime(t)
-            % Represent a datenum in slurm format.
-            T = datestr(t,'yyyy-mm-ddTHH:MM:SS');
+            % Represent a datetime in slurm format.
+            T = [char(t,'yyyy-MM-dd') 'T' char(t,'HH:mm:SS')];
         end
         function T= matlabTime(t)
-            % Rerpresent a slurm time in Matlab's datenum format.
+            % Rerpresent a slurm time in Matlab's datetime format.
             if ischar(t)
                 tCell= {t};
             else
                 tCell =t;
             end
             nrT = numel(tCell);
-            T = zeros(1,nrT);
             for i=1:nrT
                 t=tCell{i};
                 if length(t)==19
-                    T(i) = datenum(str2double(t(1:4)),str2double(t(6:7)),str2double(t(9:10)),str2double(t(12:13)),str2double(t(15:16)),str2double(t(18:19)));
+                    vals = t([1:10 12:19]);
+                    T(i) = datetime(vals,'InputFormat','yyy-MM-ddHH:mm:SS');                    %#ok<AGROW>
                 end
             end
         end
@@ -2355,23 +2386,23 @@ classdef mslurm < handle
 
 
             if ismember(exist(p.Results.mFile),[2 3 5 6 ]) %#ok<EXIST>  % Executable file
-                fprintf('%s batch file found\n',p.Results.mFile)
+                mslurm.log('%s batch file found\n',p.Results.mFile)
                 if isempty(p.Results.argsFile)
                     % Run as script (workspace will be saved to results
                     % file).
-                     fprintf('Calling %s without input arguments. \n',p.Results.mFile);                                
-                     eval(p.Results.mFile);                        
+                    mslurm.log('Calling %s without input arguments. \n',p.Results.mFile);
+                    eval(p.Results.mFile);
                 else
                     % It is a function, pass arguments struct
                     if exist(p.Results.argsFile,"file")
-                        fprintf('%s args file found\n',p.Results.argsFile)
+                        mslurm.log('%s args file found\n',p.Results.argsFile)
                         load(p.Results.argsFile,'args');
                     else
                         error('% argsFile not found.',p.Results.argsFile);
-                    end                              
+                    end
                     % A function, pass the input args as a struct
-                    fprintf('Calling %s with %d input arguments (%s). \n',p.Results.mFile,numel(fieldnames(args)),strjoin(fieldnames(args),'/'));                
-                    % Output of the function will be saved to results 
+                    mslurm.log('Calling %s with %d input arguments (%s). \n',p.Results.mFile,numel(fieldnames(args)),strjoin(fieldnames(args),'/'));
+                    % Output of the function will be saved to results
                     nout =nargout(p.Results.mFile);
                     result = cell(1,nout);
                     [result{:}]= feval(p.Results.mFile,args);      %#ok<NASGU>
@@ -2380,15 +2411,15 @@ classdef mslurm < handle
                 error('%s does not exist. Cannot run this task.',p.Results.mFile)
             end
 
-            %% Save the results                       
+            %% Save the results
             % Make a struct with all variables in teh workspace
             ws = whos;
-            vars = struct;            
+            vars = struct;
             for i = 1:length(ws)
-                vars.(ws(i).name)= eval(ws(i).name); % Store the variable value                
-            end            
+                vars.(ws(i).name)= eval(ws(i).name); % Store the variable value
+            end
             % Save the result in the jobDir as 1.result.mat, 2.result.mat
-            mslurm.saveResult([num2str(p.Results.taskNr) '.result.mat'] ,vars,p.Results.nodeTempDir,p.Results.jobDir);           
+            mslurm.saveResult([num2str(p.Results.taskNr) '.result.mat'] ,vars,p.Results.nodeTempDir,p.Results.jobDir);
         end
 
 
@@ -2407,21 +2438,21 @@ classdef mslurm < handle
             % Copy to head
             scpCommand = ['scp ' fName ' ' jobDir];
             tic;
-            warnNoTrace(['Transferring data back to head node: ' scpCommand]);
+            mslurm.log(['Transferring data back to head node: ' scpCommand]);
             [scpStatus,scpResult]  = system(scpCommand);
             if iscell(scpResult) ;scpResult = char(scpResult{:});end
 
             % Warn about scp errors
             if scpStatus~=0
                 scpResult %#ok<NOPRT>
-                warnNoTrace(['SCP of ' fName ' failed' ]); % Signal error
+                mslurm.log(['SCP of ' fName ' failed' ]); % Signal error
             elseif ~isempty(scpResult)
-                warnNoTrace(scpResult)
+                mslurm.log(scpResult)
             end
 
             [status,result]  = system(['rm  ' fName]);
             if status~=0
-                warnNoTrace(['rm  of ' fName ' failed'  ]); % Warning only
+                mslurm.log(['rm  of ' fName ' failed'  ]); % Warning only
                 result %#ok<NOPRT>
             end
 
@@ -2455,17 +2486,20 @@ classdef mslurm < handle
                     code = 1;
                 end
                 % Output callstack to help debugging
-                fprintf('*************Message***************\n')
-                fprintf('-\n %s \n-\n',me.message );
-                fprintf('***************Call Stack************\n')
+                mslurm.log('*************Message***************\n')
+                mslurm.log('-\n %s \n-\n',me.message );
+                mslurm.log('***************Call Stack************\n')
                 for i=1:numel(me.stack)
-                    fprintf('Line %d in %s (%s)\n',me.stack(i).line,me.stack(i).name,me.stack(i).file);
+                    mslurm.log('Line %d in %s (%s)\n',me.stack(i).line,me.stack(i).name,me.stack(i).file);
                 end
-                fprintf('************************************\n')
+                mslurm.log('************************************\n')
                 % Now exit
                 exit(code);
             end
         end
+
+
+
 
 
         %% Tools to store machine wide preferences
@@ -2510,7 +2544,7 @@ classdef mslurm < handle
         function install()
             % Interactive install -  loop over the prefs to ask for values
             % then set.
-            for p = mslurm.PREFS                
+            for p = mslurm.PREFS
                 value = string(input("Preferred value for " + p + "?",'s'));
                 mslurm.setpref(p,value)
             end
