@@ -5,7 +5,7 @@ cls = mslurm;
 cls.connect; % Connect
 cls.sacct; % Update ths cls object with the current state of the accounting by SLURM (e.g.. the list of running jobs)
 cls.sinfo  % Show what the cluster has to offer at this time (see manual for slurm sinfo)
-
+cls.addPath = {'/home/bart/devmslurm'};
 % Open the App  to see the jobs that the SLURM schedulre knows about (For
 % the current user). This could be empty if you did not schedule any jobs
 % yet (or if they were scheduled before the date selected in the calender).

@@ -1803,7 +1803,12 @@ classdef mslurm < handle
                     case 'ERR'
                         mslurm.STDERRFILE;
                 end
-                remoteFile= fullfile(o.remoteStorage,o.jobs(ix(i)).JobName,filename);
+                arrayElement = extractAfter(o.jobs(ix(i)).JobID,'_');
+                if ~isempty(arrayElement)
+                    arrayElement = ['_' arrayElement];
+                end
+                remoteFile= strrep(fullfile(o.remoteStorage,o.jobs(ix(i)).JobName,[filename arrayElement '.out']),'\','/');
+                               
                 localDir =fullfile(o.localStorage,o.jobs(ix(i)).JobName);
                 localFile{i} =fullfile(localDir,filename);
                 if ~exist(localFile{i},'file') || p.Results.forceRemote
@@ -1811,7 +1816,7 @@ classdef mslurm < handle
                         [pth,f,e] = fileparts(remoteFile);
                         o.ssh = scp_get(o.ssh,[f e],localDir,pth);
                     else
-                        msg{i} = ['File does not exist: ' remoteName];
+                        msg{i} = ['File does not exist: ' remoteFile];
                         if nargout <2
                             mslurm.log(msg{i});
                         end
