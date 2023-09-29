@@ -1,0 +1,3 @@
+[submodule "matlab-ssh2"]
+	path = matlab-ssh2
+	url = https://github.com/klabhub/matlab-ssh2

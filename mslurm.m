@@ -242,7 +242,7 @@ classdef mslurm < handle
             end
             % Execute an arbitrary UNIX command on the cluster.
             if ~isempty(o.ssh)
-                USESSHERR = nargout('ssh2_command'); % If you have the klab SSH fork it returns err messages for debugging. Otherwise keep this as false.
+                USESSHERR = nargout('ssh2_command')==3; % If you have the klab SSH fork it returns err messages for debugging. Otherwise keep this as false.
                 try
                     if USESSHERR
                         [o.ssh,results,err] = ssh2_command(o.ssh,cmd);
