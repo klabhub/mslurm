@@ -13,7 +13,8 @@
 %   taskBatch() - Similar to feval() but with options to
 %                       retry/continue/reuse previously uploaded data.
 %
-% See also slurmApp for a graphical interface to the jobs running on the
+% See also mslurmApp
+%
 % cluster.
 %
 % BK - Jan 2015
@@ -26,6 +27,9 @@ classdef mslurm < handle
     properties (Constant)
         PREFGRP = "mSlurm"  % Group that stores string preferences for slurm
         PREFS   = ["user","keyfile","host","remoteStorage","localStorage", "matlabRoot","nodeTempDir","headRootDir","mslurmFolder"];
+        SBATCHFILE = 'mslurmSBatch.sh';
+        STDOUTFILE = 'stdout';
+        STDERRFILE = 'stderr';
     end
 
     properties (SetAccess=public, GetAccess=public)
@@ -55,6 +59,7 @@ classdef mslurm < handle
         isConnected;            % Check that we have an open SSH connection to the cluster.
         failState;              % Current state of each of the jobs in the log.
         failStateName;
+        uid;                    % A unique ID.
     end
     properties (SetAccess=protected, GetAccess=public)
         jobs;                    % A structure with the information retrieved from the slurm accounting logs (see the sacct function below)
@@ -128,6 +133,9 @@ classdef mslurm < handle
             [stateNames{state>10}] =deal('FREQFAIL');
         end
 
+        function v = get.uid(o)
+             v = char(datetime("now",'Format','yy.MM.dd_HH.mm.SS.sss'));
+        end
     end
 
     %% Public Methods
@@ -207,14 +215,14 @@ classdef mslurm < handle
             %
             % INPUT
             % folders  - The folder with a git repo on the cluster. Or a cell
-            % array with such folder names. 
+            % array with such folder names.
             % 'submodules' [false] Set this to true to update submodules recursively with git submodule update --recursive
             %                   Note that in this case the folders have to
             %                   be the toplevel of the git repo.
-            % 
-            arguments 
+            %
+            arguments
                 o (1,1) mslurm
-                folders (1,:) 
+                folders (1,:)
                 pv.submodules (1,1) logical = false
             end
 
@@ -228,7 +236,7 @@ classdef mslurm < handle
                     cmd =sprintf('cwd= ${pwd} && cd %s && git pull origin && git submodule update --recursive && cd $cwd',folders{1});
                 else
                     % This will work from anywhere in the repo
-                     cmd =sprintf('cwd= ${pwd} && cd %s && git pull origin && cd $cwd',folders{1});
+                    cmd =sprintf('cwd= ${pwd} && cd %s && git pull origin && cd $cwd',folders{1});
                 end
                 result = o.command(cmd);
                 mslurm.log('%s - %s',folders{i}, strjoin(result,'\n'))
@@ -677,7 +685,6 @@ classdef mslurm < handle
             end
             % Name the job after the current time. Assuming this will be
             % unique.
-            uid = char(datetime("now",'Format','yy.MM.dd_HH.mm.SS.sss'));
 
             if contains(fun,{'(',';',','})
                 % This is an expression not an mfile. Create a temporary
@@ -691,7 +698,7 @@ classdef mslurm < handle
                 mfilename = which(fun);
                 copy = p.Results.copy;
             end
-            jobName =[fun '-' uid];
+            jobName =[fun '-' o.uid];
             jobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
             % Create a (unique) directory on the head node to store data and results.
             result = o.command(['mkdir ' jobDir]); %#ok<NASGU>
@@ -800,9 +807,6 @@ classdef mslurm < handle
             %
             %
 
-            % Name the job after the current time. Assuming this will be
-            % unique.
-            uid = char(datetime("now",'Format','yy.MM.dd_HH.mm.SS.sss'));
             if ~ischar(fun)
                 error('The fun argument must be the name of an m-file');
             end
@@ -829,18 +833,25 @@ classdef mslurm < handle
             end
 
             nrDataJobs = size(data,1);
-            jobName = [fun '-' uid];
-            jobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
+            id = o.uid;
+            jobName = [fun '-' id];
+
+            localJobDir = fullfile(o.localStorage,jobName);
+            if ~exist(localJobDir,'dir')
+                mkdir(localJobDir);
+            end
+            remoteJobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
             % Create a (unique) directory on the head node to store data and results.
-            if ~o.exist(jobDir,'dir')
-                result = o.command(['mkdir ' jobDir]); %#ok<NASGU>
+            if ~o.exist(remoteJobDir,'dir')
+                result = o.command(['mkdir ' remoteJobDir]); %#ok<NASGU>
             end
             % Save a local copy of the input data
-            localDataFile = fullfile(o.localStorage,[uid '_data.mat']);
-            remoteDataFile = strrep(fullfile(jobDir,[uid '_data.mat']),'\','/');
+
+            localDataFile = fullfile(localJobDir,'data.mat');
             save(localDataFile,'data','-v7.3'); % 7.3 needed to allow partial loading of the data in each worker.
             % Copy the data file to the cluster
-            o.put(localDataFile,jobDir);
+            o.put(localDataFile,remoteJobDir);
+            remoteDataFile= fullfile(remoteJobDir,'data.mat');
 
             p=inputParser;
             p.addParameter('batchOptions',o.batchOptions);
@@ -859,13 +870,13 @@ classdef mslurm < handle
 
             if ~isempty(fieldnames(p.Unmatched))
                 args = p.Unmatched;
-                argsFile = [uid '_args.mat'];
+                argsFile = 'args.mat';
                 % Save a local copy of the args
-                localArgsFile = fullfile(o.localStorage,argsFile);
-                remoteArgsFile = strrep(fullfile(jobDir,argsFile),'\','/');
+                localArgsFile = fullfile(localJobDir,argsFile);
+                remoteArgsFile = strrep(fullfile(remoteJobDir,argsFile),'\','/');
                 save(localArgsFile,'args');
                 % Copy the args file to the cluster
-                o.put(localArgsFile,jobDir);
+                o.put(localArgsFile,remoteJobDir);
             else
                 remoteArgsFile ='';
             end
@@ -873,15 +884,14 @@ classdef mslurm < handle
             if p.Results.copy
                 % Copy the mfile to remote storage.
                 mfilename = which(fun);
-                o.put(mfilename,o.remoteStorage);
+                o.put(mfilename,remoteJobDir);
             end
 
             %% Start the jobs
             opts.jobName = jobName;
-            opts.uniqueID = 'auto';
             opts.batchOptions = p.Results.batchOptions;
             opts.mfile ='mslurm.fevalRun';
-            opts.mfileExtraInput ={'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobDir};
+            opts.mfileExtraInput ={'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',remoteJobDir};
             opts.debug = p.Results.debug;
             opts.runOptions= p.Results.runOptions;
             opts.nrInArray = nrDataJobs;
@@ -1048,12 +1058,12 @@ classdef mslurm < handle
             %create a unique jobName for the group of tasks that is run on the cluster
             %but users are allowed to name the final output file, which
             %will be reflected in the name of the jobGroup
-            uid = char(datetime("now",'Format','yyMMdd_HHmmSS'));
+            id = char(datetime("now",'Format','yyMMdd_HHmmSS'));
 
             %where should the collated result from the taskBatch be saved
             if ~isempty(p.Results.outputFolder) %the user knows exactly where the result should end up
                 if p.Results.uniqueOutputName
-                    finalFolderName =  [getenv('USERNAME') '/' p.Results.outputFolder uid '/'];
+                    finalFolderName =  [getenv('USERNAME') '/' p.Results.outputFolder id '/'];
                 else
                     finalFolderName =  [ getenv('USERNAME') '/' p.Results.outputFolder];
                 end
@@ -1062,23 +1072,23 @@ classdef mslurm < handle
                     %but a clear idea how the job should be called and we
                     %can use that to create that final folder
                     if p.Results.uniqueOutputName
-                        finalFolderName =  [getenv('USERNAME') '/' p.Results.addJobName '_' uid '/'];
+                        finalFolderName =  [getenv('USERNAME') '/' p.Results.addJobName '_' id '/'];
                     else
                         finalFolderName =  [getenv('USERNAME') '/' p.Results.addJobName '/'];
                     end
                 else %the user has now opinion on how to call the job and where to save the result
                     %this might be problematic if the same function will run on future jobs
                     %because those separete results will be hard to distinguish
-                    finalFolderName =  [getenv('USERNAME') '/' fun '_' uid '/'];
+                    finalFolderName =  [getenv('USERNAME') '/' fun '_' id '/'];
                     mslurm.log('consider specifying either "jobName" or "outputFolder" or both so make your job and/or the folder where the results be saved more distinguishable. In particular if you are going to use this function for future but different jobs')
                 end
             end
 
             %how should the job be called on the cluster
             if ~isempty(p.Results.addJobName)
-                jobGroupName = cat(2,fun,'_', p.Results.addJobName, '_', uid);
+                jobGroupName = cat(2,fun,'_', p.Results.addJobName, '_', id);
             else
-                jobGroupName = cat(2,fun,'_', uid);
+                jobGroupName = cat(2,fun,'_', id);
             end
 
             %create directories on the cluster where temporary and final results can be stored
@@ -1191,10 +1201,6 @@ classdef mslurm < handle
             % 'retryBatchFile' - A batch file that will be queued on SLURM
             % without further processing. This is used by the mslurm.retry
             % function.
-            % 'uniqueID' - Use this to generate unique jobnames for each
-            % job. If the specified jobName is already unique, set this to
-            % '', if you want this function to make the jobName unique,
-            % specify 'auto'.
             % 'taskNr' - Used only for standard (non-array) jobs: this is
             % the number that will be passed to your mfile as the second
             % argument.
@@ -1220,7 +1226,7 @@ classdef mslurm < handle
             % mslurm/sbatch to submit jobs to the scheduler.
 
             p = inputParser;
-            p.addParameter('jobName','job',@ischar );
+            p.addParameter('jobName',o.uid,@ischar );
             p.addParameter('batchOptions',o.batchOptions,@iscell);
             p.addParameter('runOptions','',@ischar);
             p.addParameter('mfile','',@ischar);
@@ -1229,7 +1235,6 @@ classdef mslurm < handle
             p.addParameter('nrInArray',0,@(x) (isnumeric(x) && isscalar(x)));
             p.addParameter('debug',false,@islogical);
             p.addParameter('retryBatchFile','',@ischar);
-            p.addParameter('uniqueID','',@ischar); % Use 'auto' to generate
             p.addParameter('taskNr',0,@isnumeric);
             p.addParameter('startupDirectory',o.startupDirectory,@ischar);% Matlab will startup in this directory (-sd command line argument)
             p.addParameter('workingDirectory',o.workingDirectory,@ischar);
@@ -1291,33 +1296,26 @@ classdef mslurm < handle
 
 
                 jobName = p.Results.jobName;
+                remoteJobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
+                localJobDir = fullfile(o.localStorage,jobName);
+            
                 if p.Results.nrInArray>=1
                     % Ensure that array job numbers generated by slurm are
                     % base-1 (default is base zero)
                     batchOpts = cat(2,p.Results.batchOptions,{'array',['1-' num2str(p.Results.nrInArray)]});
-                    outFile = '%A_%a.out';
+                    outFile = [mslurm.STDOUTFILE '_%a.out'];
                 else
                     batchOpts = p.Results.batchOptions;
-                    outFile = '%A.out';
+                    outFile = mslurm.STDOUTFILE;
                 end
                 % Options with empty values are removed.
                 empty = find(cellfun(@isempty,batchOpts(2:2:end)));
                 batchOpts([2*empty-1 2*empty])= [];
-                if isempty(p.Results.uniqueID)
-                    % Presumable the user knows what they're doing and the
-                    % jobName is unique on its own
-                    uniqueID = '';
-                elseif strcmpi(p.Results.uniqueID,'auto')
-                    %Generate a unique ID
-                    [~,uniqueID]=fileparts(tempname);
-                    uniqueID = ['.' uniqueID];
-                else
-                    uniqueID = ['.' p.Results.uniqueID];
-                end
-                batchFile = sprintf('%s%s.sh',jobName,uniqueID);
-                fid  =fopen( fullfile(o.localStorage,batchFile) ,'w'); % no t (unix line endings are needed)
+
+                batchFile = mslurm.SBATCHFILE;                
+                fid  =fopen(fullfile(localJobDir,mslurm.SBATCHFILE) ,'w'); % no t (unix line endings are needed)
                 fprintf(fid,'#!/bin/bash\n');
-                batchOpts = cat(2,batchOpts, {'job-name',jobName,'output',outFile,'error',outFile,'comment',mslurm.encodeComment('','sbatch',batchFile)});
+                batchOpts = cat(2,batchOpts, {'job-name',jobName,'output',outFile,'error',outFile});
                 for opt=1:2:numel(batchOpts)
                     if isempty(batchOpts{opt+1})
                         fprintf(fid,'#SBATCH --%s\n',batchOpts{opt});
@@ -1337,7 +1335,9 @@ classdef mslurm < handle
                 fprintf(fid,'srun %s %s\n',p.Results.runOptions,run);
                 fclose(fid);
             else
-                % Use the specified batch file. Extract the job name.
+
+                %TODO extract job file 
+                % Use the specified batch file. Extract the job name.\
                 batchFile = p.Results.retryBatchFile;
                 % fid = fopen(fullfile(o.localStorage,batchFile));
                 % while (fid >0 && = fgetl(fid) )
@@ -1348,15 +1348,15 @@ classdef mslurm < handle
 
             if p.Results.debug
                 mslurm.log ('Debug mode. Nothing will be submitted to SLURM')
-                edit (fullfile(o.localStorage,batchFile));
+                edit (fullfile(localJobDir,batchFile));
                 jobId=0;result = 'debug mode';
             else
                 if isempty(p.Results.retryBatchFile)
                     % Copy the flie to the cluster
-                    o.put(fullfile(o.localStorage,batchFile),o.remoteStorage);
+                    o.put(fullfile(localJobDir,batchFile),remoteJobDir);
                 end
                 % Start the sbatch
-                [result,err] = o.command(sprintf('cd %s ;sbatch %s/%s',o.remoteStorage,o.remoteStorage,batchFile));
+                [result,err] = o.command(sprintf('cd %s ;sbatch %s/%s',remoteJobDir,remoteJobDir,batchFile));
                 jobId = str2double(regexp(result{1},'\d+','match'));
                 if iscell(err)
                     err = err{1};
@@ -1758,8 +1758,8 @@ classdef mslurm < handle
             end
         end
 
-        function [localName,msg] = getFile(o,jobId,varargin )
-            % Retrieve a  file from the cluster. This can be the redirected
+        function [localFile,msg] = getFile(o,jobId,varargin )
+            % Retrieve logging files from the cluster. This can be the redirected
             % stdout (type =out) or stderr (type=err), or the bash shell script (type =sh)
             % Currently sbatch writes both out and err to the same .out file so the
             % 'err' file has no information.
@@ -1770,7 +1770,7 @@ classdef mslurm < handle
             % 'type' = 'out' or 'err' or 'sh'
             % 'forceRemote' = Force reading from remote [true].
             % OUTPUT
-            %  localName = The full name of the file on the local/client
+            %  localFile = The full name of the file on the local/client
             %  computer. This can be a cell array if multiple files are
             %  requested (ie. for multiple jobids)
             % msg = Error messages.
@@ -1788,67 +1788,49 @@ classdef mslurm < handle
             % the comment while the task is running. Strange but true.
             if ischar(jobId);jobId= {jobId};end
             nrFiles = numel(jobId);
-            filename = cell(1,nrFiles);
+            localFile= cell(1,nrFiles);
+            msg = cell(1,nrFiles);
+            [msg{:}] = deal('');
             [tf,ix] = ismember(jobId,{o.jobs.JobID});
             if ~all(tf);error('JobIds not known.');end
-
-
             for i=1:nrFiles
                 switch upper(p.Results.type)
                     case 'SH'
-                        searchStr = 'Command';
-                        thisFilename = mslurm.decodeComment(o.jobs(ix(i)).Comment,'sbatch');
-                        if iscell(thisFilename);thisFilename= thisFilename{1};end
+                        filename =mslurm.SBATCHFILE;
                     case 'OUT'
-                        searchStr ='StdOut';
-                        thisFilename =[o.jobs(ix(i)).JobID '.out'];
+                        filename =mslurm.STDOUTFILE;
                     case 'ERR'
-                        searchStr = 'StdErr';
-                        thisFilename =[o.jobs(ix(i)).JobID '.err'];
+                        mslurm.STDERRFILE;
                 end
-
-                if isempty(thisFilename)
-                    % Try scontrol
-                    thisFilename = o.command(['scontrol show job ' jobId{i} ' | awk -F= ''/' searchStr '=/{print $2}''']);
-                    if iscell(thisFilename);thisFilename = thisFilename{1};end
-                    [~,thisFilename,ext] = fileparts(thisFilename); % strip path
-                    thisFilename = [thisFilename ext]; %#ok<AGROW>
-                end
-
-                filename{i} = thisFilename;
-            end
-            %% Retrieve it f,rom the cluster if not available local
-            msg = cell(1,nrFiles);
-            [msg{:}] = deal('');
-            localName = cell(1,nrFiles);
-            for i = 1:nrFiles
-                if isempty(filename{i})
-                    msg{i} = 'Could not determine filename';
-                else
-                    localName{i}= fullfile(o.localStorage,filename{i} );
-                    if ~exist(localName{i},'file') || p.Results.forceRemote
-                        remoteName= strrep(fullfile(o.remoteStorage,filename{i}),'\','/');
-                        if o.exist(remoteName,'file')
-                            o.ssh = scp_get(o.ssh,filename{i},o.localStorage,o.remoteStorage);
-                        else
-                            msg{i} = ['File does not exist: ' remoteName];
-                            if nargout <2
-                                mslurm.log(msg{i});
-                            end
+                remoteFile= fullfile(o.remoteStorage,o.jobs(ix(i)).JobName,filename);
+                localDir =fullfile(o.localStorage,o.jobs(ix(i)).JobName);
+                localFile{i} =fullfile(localDir,filename);
+                if ~exist(localFile{i},'file') || p.Results.forceRemote
+                    if o.exist(remoteFile,'file')
+                        [pth,f,e] = fileparts(remoteFile);
+                        o.ssh = scp_get(o.ssh,[f e],localDir,pth);
+                    else
+                        msg{i} = ['File does not exist: ' remoteName];
+                        if nargout <2
+                            mslurm.log(msg{i});
                         end
                     end
+
                 end
             end
+
             if nargout==0
                 %% Open in editor
-                edit(localName{:});
+                edit(localFile{:});
             elseif nrFiles==1
                 % Return char if possible
-                localName =localName{1};
+                localFile =localFile{1};
                 msg  = msg{1};
             end
 
         end
+
+
 
         function sinfo(o,args)
             % Call sinfo on the cluster. Command line args can be specified
