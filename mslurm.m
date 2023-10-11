@@ -46,6 +46,7 @@ classdef mslurm < handle
         addPath             = {}; % Cell array of folders that shoudl be added to the path.
         batchOptions        = {}; % Options passed to sbatch (parm,value pairs)
         runOptions          = ''; % Options passed to srun
+        env                 = ""; % A string array of environment variable names that will be passed to the cluster.
 
     end
 
@@ -225,10 +226,10 @@ classdef mslurm < handle
                 if pv.submodules
                     % This sumodule update will only work if the folder is the root folder
                     % of the git repo.
-                    cmd =sprintf('cwd= ${pwd} && cd %s && git pull origin && git submodule update --recursive && cd $cwd',folders{1});
+                    cmd =sprintf('cwd= ${pwd} && cd %s && git pull origin && git submodule update --recursive && cd $cwd',folders{i});
                 else
                     % This will work from anywhere in the repo
-                     cmd =sprintf('cwd= ${pwd} && cd %s && git pull origin && cd $cwd',folders{1});
+                     cmd =sprintf('cwd= ${pwd} && cd %s && git pull origin && cd $cwd',folders{i});
                 end
                 result = o.command(cmd);
                 mslurm.log('%s - %s',folders{i}, strjoin(result,'\n'))
@@ -1234,6 +1235,7 @@ classdef mslurm < handle
             p.addParameter('startupDirectory',o.startupDirectory,@ischar);% Matlab will startup in this directory (-sd command line argument)
             p.addParameter('workingDirectory',o.workingDirectory,@ischar);
             p.addParameter('addPath',o.addPath,@(x) ischar(x) || iscellstr(x)); % Add these folders to the Matlab path by calling addpath(x)
+            p.addParameter('env',o.env,@isstring); % Environment variables to read on the client and set on the cluster.
             p.parse(varargin{:});
             if ischar(p.Results.addPath)
                 addPth = {p.Results.addPath};
@@ -1334,6 +1336,17 @@ classdef mslurm < handle
                         error('sbatch options should be char or numeric');
                     end
                 end
+                % Read the environment, and package it to pass to sbatch.
+                % Note that the passed env are additional to the ones
+                % already defined on the cluster (and the ones on the
+                % cluster take precedence).
+                if p.Results.env ~=""
+                    isLocalEnv = ~contains(p.Results.env,"=");
+                    val = getenv(p.Results.env(isLocalEnv));
+                    str = strjoin(strcat(p.Results.env(isLocalEnv),'=',val),',');
+                    str = strjoin([str  p.Results.env(~isLocalEnv)],',');
+                    fprintf(fid,'#SBATCH --export=ALL,%s\n',str);
+                end
                 fprintf(fid,'srun %s %s\n',p.Results.runOptions,run);
                 fclose(fid);
             else
@@ -1365,7 +1378,6 @@ classdef mslurm < handle
                 end
             end
         end
-
 
         function result = cancel(o,varargin)
             % Cancel a slurm job by its Job ID
