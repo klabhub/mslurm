@@ -46,7 +46,7 @@ classdef mslurm < handle
         addPath             = {}; % Cell array of folders that shoudl be added to the path.
         batchOptions        = {}; % Options passed to sbatch (parm,value pairs)
         runOptions          = ''; % Options passed to srun
-        env                 = ""; % A string array of environment variable names that will be passed to the cluster.
+        env                 = ""; % A string array of environment variable names that will be read from the client environemtn and passed to the cluster. To set a cluster environment variable to a specific value,some of these elements can be "VAR=VALUE"
 
     end
 
@@ -208,14 +208,14 @@ classdef mslurm < handle
             %
             % INPUT
             % folders  - The folder with a git repo on the cluster. Or a cell
-            % array with such folder names. 
+            % array with such folder names.
             % 'submodules' [false] Set this to true to update submodules recursively with git submodule update --recursive
             %                   Note that in this case the folders have to
             %                   be the toplevel of the git repo.
-            % 
-            arguments 
+            %
+            arguments
                 o (1,1) mslurm
-                folders (1,:) 
+                folders (1,:)
                 pv.submodules (1,1) logical = false
             end
 
@@ -223,16 +223,22 @@ classdef mslurm < handle
                 folders= {folders};
             end
             for i=1:numel(folders)
-                if pv.submodules
-                    % This sumodule update will only work if the folder is the root folder
-                    % of the git repo.
-                    cmd =sprintf('cwd= ${pwd} && cd %s && git pull origin && git submodule update --recursive && cd $cwd',folders{i});
+                cmd =sprintf('cd %s && git status',folders{i});
+                isClean = any(contains(o.command(cmd),'nothing to commit'));
+                if isClean
+                    if pv.submodules
+                        % This sumodule update will only work if the folder is the root folder
+                        % of the git repo.
+                        cmd =sprintf('cwd= ${pwd} && cd %s && git pull origin && git submodule update --recursive && cd $cwd',folders{i});
+                    else
+                        % This will work from anywhere in the repo
+                        cmd =sprintf('cwd= ${pwd} && cd %s && git pull origin && cd $cwd',folders{i});
+                    end
+                    result = o.command(cmd);
+                    mslurm.log('%s - %s',folders{i}, strjoin(result,'\n'))
                 else
-                    % This will work from anywhere in the repo
-                     cmd =sprintf('cwd= ${pwd} && cd %s && git pull origin && cd $cwd',folders{i});
+                    mslurm.log('%s has changes on the remote host. Not git pulling\n',folders{i})
                 end
-                result = o.command(cmd);
-                mslurm.log('%s - %s',folders{i}, strjoin(result,'\n'))
             end
 
         end
@@ -693,6 +699,7 @@ classdef mslurm < handle
                 copy = p.Results.copy;
             end
             jobName =[fun '-' uid];
+            mslurm.log('Preparing %s ... \n',jobName);
             jobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
             % Create a (unique) directory on the head node to store data and results.
             result = o.command(['mkdir ' jobDir]); %#ok<NASGU>
@@ -2561,6 +2568,22 @@ classdef mslurm < handle
                 mslurm.setpref(p,value)
             end
         end
+    
+
+    %% Set the status bar text of the Matlab desktop (from undocumented matlab)
+    function status(msg,varargin)
+        statusText = sprintf(msg,varargin{:});
+        desktop = com.mathworks.mde.desk.MLDesktop.getInstance;     %#ok<JAPIMATHWORKS>
+        if desktop.hasMainFrame
+            % Schedule a timer to update the status text
+            % Note: can't update immediately (will be overridden by Matlab's 'busy' message)
+            timerFcn = @(~,~)(desktop.setStatusText(statusText));
+            t = timer('TimerFcn',timerFcn, 'StartDelay',0.05, 'ExecutionMode','singleShot');
+            start(t);
+        else
+            disp(statusText);
+        end
+    end
     end
 end
 

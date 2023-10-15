@@ -75,11 +75,13 @@ The jobs posted to SLURM in each session typically share several parameters. You
 - **addPath:** A cell array of char specifying the path(s) that should be included on the cluster. This  will be passed to addpath() on the cluster.
 - **batchOptions:** A cell array of parameter/value pairs that are passed verbatim to the slurm sbatch command. See the (man page for sbatch for all options)[https://slurm.schedmd.com/sbatch.html]. These options are key to requesting the right kind of compute nodes for your job.
 - **runOptions:** A char that is passed verbatim to the ```srun``` command. You probably do not need this, but see the (man page)[https://slurm.schedmd.com/srun.html] for valid options.
+- **env:** A string array with environment variables. These are read from the environment on the client and set on the cluster. To set a different value, use "VAR=VALUE".
 
 For example:
 ```matlab
 c.addPath = {'/home/bart/tools'}; % Make sure that my tools folder is  accessible on the cluster. 
 c.batchOptions = {'mem','32GB','time',30}; %Request workers with at least 32GB of memory and a wall time of 30 minutes. 
+c.env = ["HOST" "USER" "HOME=/home/joe"] % Read the HOST and USER environment variables from the client, but set the HOME variable to /home/joe.
 ```
 
 
