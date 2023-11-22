@@ -50,6 +50,7 @@ classdef mslurm < handle
         addPath             = {}; % Cell array of folders that shoudl be added to the path.
         batchOptions        = {}; % Options passed to sbatch (parm,value pairs)
         runOptions          = ''; % Options passed to srun
+        env                 = ""; % A string array of environment variable names that will be read from the client environemtn and passed to the cluster. To set a cluster environment variable to a specific value,some of these elements can be "VAR=VALUE"
 
     end
 
@@ -230,16 +231,22 @@ classdef mslurm < handle
                 folders= {folders};
             end
             for i=1:numel(folders)
-                if pv.submodules
-                    % This sumodule update will only work if the folder is the root folder
-                    % of the git repo.
-                    cmd =sprintf('cwd= ${pwd} && cd %s && git pull origin && git submodule update --recursive && cd $cwd',folders{1});
+                cmd =sprintf('cd %s && git status',folders{i});
+                isClean = any(contains(o.command(cmd),'nothing to commit'));
+                if isClean
+                    if pv.submodules
+                        % This sumodule update will only work if the folder is the root folder
+                        % of the git repo.
+                        cmd =sprintf('cwd= ${pwd} && cd %s && git pull origin && git submodule update --recursive && cd $cwd',folders{i});
+                    else
+                        % This will work from anywhere in the repo
+                        cmd =sprintf('cwd= ${pwd} && cd %s && git pull origin && cd $cwd',folders{i});
+                    end
+                    result = o.command(cmd);
+                    mslurm.log('%s - %s',folders{i}, strjoin(result,'\n'))
                 else
-                    % This will work from anywhere in the repo
-                    cmd =sprintf('cwd= ${pwd} && cd %s && git pull origin && cd $cwd',folders{1});
+                    mslurm.log('%s has changes on the remote host. Not git pulling\n',folders{i})
                 end
-                result = o.command(cmd);
-                mslurm.log('%s - %s',folders{i}, strjoin(result,'\n'))
             end
 
         end
@@ -699,6 +706,7 @@ classdef mslurm < handle
                 copy = p.Results.copy;
             end
             jobName =[fun '-' o.uid];
+            mslurm.log('Preparing %s. ',jobName);
             jobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
             % Create a (unique) directory on the head node to store data and results.
             result = o.command(['mkdir ' jobDir]); %#ok<NASGU>
@@ -1239,6 +1247,7 @@ classdef mslurm < handle
             p.addParameter('startupDirectory',o.startupDirectory,@ischar);% Matlab will startup in this directory (-sd command line argument)
             p.addParameter('workingDirectory',o.workingDirectory,@ischar);
             p.addParameter('addPath',o.addPath,@(x) ischar(x) || iscellstr(x)); % Add these folders to the Matlab path by calling addpath(x)
+            p.addParameter('env',o.env,@isstring); % Environment variables to read on the client and set on the cluster.
             p.parse(varargin{:});
             if ischar(p.Results.addPath)
                 addPth = {p.Results.addPath};
@@ -1333,6 +1342,17 @@ classdef mslurm < handle
                         error('sbatch options should be char or numeric');
                     end
                 end
+                % Read the environment, and package it to pass to sbatch.
+                % Note that the passed env are additional to the ones
+                % already defined on the cluster (and the ones on the
+                % cluster take precedence).
+                if p.Results.env ~=""
+                    isLocalEnv = ~contains(p.Results.env,"=");
+                    val = getenv(p.Results.env(isLocalEnv));
+                    str = strjoin(strcat(p.Results.env(isLocalEnv),'=',val),',');
+                    str = strjoin([str  p.Results.env(~isLocalEnv)],',');
+                    fprintf(fid,'#SBATCH --export=ALL,%s\n',str);
+                end
                 fprintf(fid,'srun %s %s\n',p.Results.runOptions,run);
                 fclose(fid);
             else
@@ -1369,7 +1389,6 @@ classdef mslurm < handle
                 end
             end
         end
-
 
         function result = cancel(o,varargin)
             % Cancel a slurm job by its Job ID
@@ -2540,6 +2559,22 @@ classdef mslurm < handle
                 mslurm.setpref(p,value)
             end
         end
+    
+
+    %% Set the status bar text of the Matlab desktop (from undocumented matlab)
+    function status(msg,varargin)
+        statusText = sprintf(msg,varargin{:});
+        desktop = com.mathworks.mde.desk.MLDesktop.getInstance;     %#ok<JAPIMATHWORKS>
+        if desktop.hasMainFrame
+            % Schedule a timer to update the status text
+            % Note: can't update immediately (will be overridden by Matlab's 'busy' message)
+            timerFcn = @(~,~)(desktop.setStatusText(statusText));
+            t = timer('TimerFcn',timerFcn, 'StartDelay',0.05, 'ExecutionMode','singleShot');
+            start(t);
+        else
+            disp(statusText);
+        end
+    end
     end
 end
 
