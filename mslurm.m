@@ -699,7 +699,7 @@ classdef mslurm < handle
                 copy = p.Results.copy;
             end
             jobName =[fun '-' uid];
-            mslurm.log('Preparing %s ... \n',jobName);
+            mslurm.log('Preparing %s. ',jobName);
             jobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
             % Create a (unique) directory on the head node to store data and results.
             result = o.command(['mkdir ' jobDir]); %#ok<NASGU>
