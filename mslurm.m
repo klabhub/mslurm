@@ -10,16 +10,13 @@
 %   batch() - Run a script (or function with some parm/value pairs) N times in parallel.
 %   feval()  - Analyze each of the rows of an array of data with the same function.
 %   fileInFileOut() - Given a list of files, analyze each file.
-%   taskBatch() - Similar to feval() but with options to
-%                       retry/continue/reuse previously uploaded data.
 %
-% See also mslurmApp
+% See also mslurmApp for a graphical interface to running jobs.
 %
-% cluster.
 %
 % BK - Jan 2015
 % June 2017 - Public release.
-% Sept 2023 - Update.
+% Sept 2023 - Update./Rewrite
 
 %#ok<*ISCLSTR>
 classdef mslurm < handle
@@ -95,8 +92,6 @@ classdef mslurm < handle
             % cumulative number of attempts.
 
             failedStates = {'CANCELLED','FAILED','NODE_FAIL','PREEMPTED','SUSPENDED','TIMEOUT'};
-            %notFailedStates = {'COMPLETED','CONFIGURING','COMPLETING','PENDING','RUNNING','RESIZING'};
-
             % Find the failed jobs
             states = {o.jobs.State};
             jobNames = {o.jobs.JobName};
@@ -135,12 +130,33 @@ classdef mslurm < handle
         end
 
         function v = get.uid(o)
-             v = char(datetime("now",'Format','yy.MM.dd_HH.mm.SS.sss'));
+            % A unique id for a job
+            v = char(datetime("now",'Format','yy.MM.dd_HH.mm.SS.sss'));
         end
     end
 
     %% Public Methods
     methods (Access=public)
+        function [local,remote,jobName]= setupJob(o,prefix)
+            arguments
+                o (1,1) mslurm
+                prefix (1,1) string
+            end
+            id= o.uid;
+            jobName = [prefix '-' id];
+            local = fullfile(o.localStorage,jobName);
+
+            if ~exist(local,'dir')
+                [success,message] = mkdir(local);
+            end
+
+            assert(success,'Failed to create local folder %s (%s)',local,message);
+            remote = unixfile(o.remoteStorage,jobName);
+            if ~o.exist(remote,'dir')
+                o.command(['mkdir ' remote]);
+            end
+        end
+
         function o = mslurm(pv)
             % Construct a mslurm object.Specify parameter/value pairs for
             % Host, User, keyfile, remoteStorage, localStorage, and
@@ -198,7 +214,7 @@ classdef mslurm < handle
         end
 
         function v = fairshare(o,usr)
-            % Show the fairsahre score of the uer (or any user)
+            % Show the fairshare score of the uer (or any user)
             % 1= good, 0= bad.
             if nargin <2
                 usr = o.user;
@@ -211,8 +227,8 @@ classdef mslurm < handle
         function gitpull(o,folders,pv)
             % Convenience function to pull a remote git repo from the
             % origin (typially used to sync local code development with
-            % remote execution). Note that submodules will alsobe updated
-            % using submodule update --recursive.
+            % remote execution). Submodules can also be updated
+            % using.
             %
             % INPUT
             % folders  - The folder with a git repo on the cluster. Or a cell
@@ -252,10 +268,10 @@ classdef mslurm < handle
         end
 
         function [results,err] = command(o,cmd,varargin)
+            % Execute an arbitrary UNIX command on the cluster.
             if nargin>2
                 cmd = sprintf(cmd,varargin{:});
             end
-            % Execute an arbitrary UNIX command on the cluster.
             if ~isempty(o.ssh)
                 USESSHERR = nargout('ssh2_command')==3; % If you have the klab SSH fork it returns err messages for debugging. Otherwise keep this as false.
                 try
@@ -400,8 +416,8 @@ classdef mslurm < handle
             if nargin <2
                 options ='';
             end
-            uid = char(datetime("now",'Format','sss'));
-            filename = ['smap.output.' uid '.txt'];
+            id = char(datetime("now",'Format','sss'));
+            filename = ['smap.output.' id '.txt'];
             msg = o.command([' smap ' options ' -c > ' o.remoteStorage '/' filename]);
             try
                 o.ssh = scp_get(o.ssh,filename,o.localStorage,o.remoteStorage);
@@ -425,7 +441,7 @@ classdef mslurm < handle
             % the users' mfile. Jobs that failed will have an empty element
             % in the array. The order of results is the same as the order
             % of the data provided to the mfile in the call to mslurm.feval.
-            %
+            % INPUT
             % tag = the tag (unique id) that identifies the job (returned
             % by mslurm.feval and mslurm.batch)
             %
@@ -596,31 +612,27 @@ classdef mslurm < handle
 
 
             %% Setup the jobs
-            uid = char(datetime("now",'Format','yy.MM.dd_HH.mm.SS.sss'));
             if ~ischar(fun)
                 error('The fun argument must be the name of an m-file');
             end
-            jobName = [fun '-' uid];
-            jobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
-            localDataFile = fullfile(o.localStorage,[uid '_data.mat']);
-            remoteDataFile = strrep(fullfile(jobDir,[uid '_data.mat']),'\','/');
+            [local,remote,jobName]= setupJob(o,fun);
 
-
-
+            localDataFile = fullfile(local,[id '_data.mat']);
+            remoteDataFile = fullfile(remote,[id '_data.mat']);
             save(localDataFile,'inFile','outFile','inPath','outPath','-v7.3'); % 7.3 needed to allow partial loading of the data in each worker.
             % Copy the data file to the cluster
-            o.put(localDataFile,jobDir);
+            o.put(localDataFile,remote);
 
 
             if ~isempty(fieldnames(p.Unmatched))
                 args = p.Unmatched;
-                argsFile = [uid '_args.mat'];
+                argsFile = [id '_args.mat'];
                 % Save a local copy of the args
-                localArgsFile = fullfile(o.localStorage,argsFile);
-                remoteArgsFile = strrep(fullfile(jobDir,argsFile),'\','/');
+                localArgsFile = fullfile(local,argsFile);
+                remoteArgsFile = fullfile(remote,argsFile);
                 save(localArgsFile,'args');
                 % Copy the args file to the cluster
-                o.put(localArgsFile,jobDir);
+                o.put(localArgsFile,remote);
             else
                 remoteArgsFile ='';
             end
@@ -628,7 +640,7 @@ classdef mslurm < handle
             if p.Results.copy
                 % Copy the mfile to remote storage.
                 mfilename = which(fun);
-                o.put(mfilename,o.remoteStorage);
+                o.put(mfilename,remote);
             end
 
             %% Start the jobs
@@ -705,30 +717,29 @@ classdef mslurm < handle
                 mfilename = which(fun);
                 copy = p.Results.copy;
             end
-            jobName =[fun '-' o.uid];
+
+            [local,remote,jobName]= setupJob(o,fun);
+
             mslurm.log('Preparing %s. ',jobName);
-            jobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
-            % Create a (unique) directory on the head node to store data and results.
-            result = o.command(['mkdir ' jobDir]); %#ok<NASGU>
 
             %% Find the unmatched and save as input arg.
             if ~isempty(fieldnames(p.Unmatched))
                 args = p.Unmatched;
                 argsFile = [jobName '_args.mat'];
                 % Save a local copy of the args
-                localArgsFile = fullfile(o.localStorage,argsFile);
-                remoteArgsFile = strrep(fullfile(jobDir,argsFile),'\','/');
+                localArgsFile = fullfile(local,argsFile);
+                remoteArgsFile = unixfile(remote,argsFile);
                 save(localArgsFile,'args');
                 % Copy the args file to the cluster
-                o.put(localArgsFile,jobDir);
+                o.put(localArgsFile,remote);
             else
                 remoteArgsFile ='';
             end
 
             if copy
                 % Copy the mfile to remote storage.
-                o.put(mfilename,jobDir);
-                addToPath = cat(2,addPth,jobDir);
+                o.put(mfilename,remote);
+                addToPath = cat(2,addPth,remote);
             else
                 addToPath = addPth;
             end
@@ -738,7 +749,7 @@ classdef mslurm < handle
             opts.uniqueID = 'auto';
             opts.batchOptions = p.Results.batchOptions;
             opts.mfile ='mslurm.batchRun'; % This is the function that will interpret the input args and pass them to fun
-            opts.mfileExtraInput ={'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobDir};
+            opts.mfileExtraInput ={'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',remote};
             opts.debug = p.Results.debug;
             opts.runOptions= p.Results.runOptions;
             opts.nrInArray = p.Results.nrWorkers;
@@ -841,25 +852,14 @@ classdef mslurm < handle
             end
 
             nrDataJobs = size(data,1);
-            id = o.uid;
-            jobName = [fun '-' id];
+            [local,remote,jobName]= setupJob(o,fun);
 
-            localJobDir = fullfile(o.localStorage,jobName);
-            if ~exist(localJobDir,'dir')
-                mkdir(localJobDir);
-            end
-            remoteJobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
-            % Create a (unique) directory on the head node to store data and results.
-            if ~o.exist(remoteJobDir,'dir')
-                result = o.command(['mkdir ' remoteJobDir]); %#ok<NASGU>
-            end
             % Save a local copy of the input data
-
-            localDataFile = fullfile(localJobDir,'input.mat');
+            localDataFile = fullfile(local,'input.mat');
             save(localDataFile,'data','-v7.3'); % 7.3 needed to allow partial loading of the data in each worker.
             % Copy the data file to the cluster
-            o.put(localDataFile,remoteJobDir);
-            remoteDataFile= strrep(fullfile(remoteJobDir,'input.mat'),'\','/');
+            o.put(localDataFile,remote);
+            remoteDataFile= unixfile(remote,'input.mat');
 
             p=inputParser;
             p.addParameter('batchOptions',o.batchOptions);
@@ -880,11 +880,11 @@ classdef mslurm < handle
                 args = p.Unmatched;
                 argsFile = 'args.mat';
                 % Save a local copy of the args
-                localArgsFile = fullfile(localJobDir,argsFile);
-                remoteArgsFile = strrep(fullfile(remoteJobDir,argsFile),'\','/');
+                localArgsFile = fullfile(local,argsFile);
+                remoteArgsFile = unixfile(remote,argsFile);
                 save(localArgsFile,'args');
                 % Copy the args file to the cluster
-                o.put(localArgsFile,remoteJobDir);
+                o.put(localArgsFile,remote);
             else
                 remoteArgsFile ='';
             end
@@ -892,14 +892,14 @@ classdef mslurm < handle
             if p.Results.copy
                 % Copy the mfile to remote storage.
                 mfilename = which(fun);
-                o.put(mfilename,remoteJobDir);
+                o.put(mfilename,remote);
             end
 
             %% Start the jobs
             opts.jobName = jobName;
             opts.batchOptions = p.Results.batchOptions;
             opts.mfile ='mslurm.fevalRun';
-            opts.mfileExtraInput ={'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',remoteJobDir};
+            opts.mfileExtraInput ={'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',remote};
             opts.debug = p.Results.debug;
             opts.runOptions= p.Results.runOptions;
             opts.nrInArray = nrDataJobs;
@@ -911,274 +911,8 @@ classdef mslurm < handle
         end
 
 
-        function jobInfo = taskBatch(o,fun,data,args,varargin)
-            %function jobInfo = taskBatch(o,fun,data,args,varargin)
-            %
-            %Users can either upload a dataset via this function to process
-            %their data via their function 'fun' or they can provide a jobID
-            %from a previous job or a jobName of a previous job to re-use data
-            %that was uploaded with that previous job (or attempt).
-            %
-            %In case the user uploads their data, then a call to taskBatch will look
-            %approximately like this:
-            %       jobInfo = taskBatch('userFun',data,args,'uniqueOutputName',false,'collateFun','userCollateFun','outputFolder','me_12Mar2018/frequencyAnalysis/','addJobName','merry_frequencyAnalysis','batchOptions',{'time','23:50:00','partition','day-long'});
-            %       userCollateFun can either be a function handle such as userCollateFun = @(x) userFun(x,'action','collate'), to pass additional input to the user's function.
-            %       If no additional input arguments are necessary then collate fun can also just be the name of the function (in quotation marks) to be used for collating results ('collateFunName').
-            %       If collateFun is empty then the result will be a struct array in the form of result(1:nrTasks).result...
-            %
-            %In case the user wants to re-use data that was already uploaded to
-            %the cluster with a previous job, the only difference will be what
-            %is specified in 'data'.
-            %       It will either be a jobID ->
-            %           jobInfo = taskBatch('userFun','110055',args,...)
-            %       Or a jobName
-            %           jobInfo =
-            %           taskBatch('userFun','testCoherence_me_12Mar2018_frequencyAnalysis_180206_025611',args,...)
-            %
-            % If the result of the call to taskBatch should stay unique, the user can set 'uniqueOutputName' to true so that a subfolder in
-            % the form of \yymmdd_hhmmss\ will be generated and the result will be transferred to that folder.
-            %
-            % AS Feb-2018
 
-
-            %did the user provide additional inut arguments for the function they want
-            %to run on the cluster
-            if isempty(args)
-                error(['No input arguments provided for the function "' fun '" to run on the cluster. Provide at least "args.tasks" or consider using o.feval or o.sbatch instead of o.taskBatch.'])
-            end
-
-            %how many jobs should be submitted depends on the size of args.tasks
-            if iscell(data)
-                if isempty(args)
-                    error('No input provided for "args". Either specify that variable or consider using either o.feval or o.sbatch instead of taskBatch to submit jobs.');
-                end
-                dataType = 'realData';
-            elseif ischar(args)
-                error('"args" cannot be strings but needs to be real data');
-            elseif ischar(data)
-                %this option is reserved for referencing previously submitted jobs
-                %to re-use data that already exists on the cluster
-                if ~isequal(sum(isletter(data)),0)
-                    mslurm.log(['checking whether data from the job with the name: "' data '" still exists...'])
-                    dataType = 'jobName';
-                elseif isequal(sum(isletter(data)),0)
-                    mslurm.log(['checking whether data from the job with the ID: "' data '" still exists...'])
-                    dataType = 'jobID';
-                end
-
-            else  %we really shouldn't end up here...
-                error('There is something wrong with either "data" or "args". Please look into what you submitted. "data" needs to be a struct (-array) or cell array and "args" needs to be a struct or struct array.');
-            end
-
-            %how many tasks should be submitted
-            if isequal(length(args),1)
-                try
-                    if iscell(args.tasks)
-                        nrInArray = length(args.tasks);
-                    end
-                catch
-                    error('"args" must be a struct that contains the field "tasks" which should be a cell array which size defines the number of tasks submitted.');
-                end
-            end
-            %put data and args into the right format
-            if isrow(data) && ~ischar(data)
-                % This is interpreted as a column.
-                data = data';
-            end
-            if isrow(args)
-                args = args';
-            end
-
-
-            %InputParser/Parameters:
-            p = inputParser;
-            p.StructExpand = true;
-            p.KeepUnmatched = true;
-            addParameter(p,'batchOptions',{});                              %instructions that include information such as wall-time, and partition type
-            addParameter(p,'runOptions','');
-            addParameter(p,'uniqueOutputName',false);                        %will the final collated filename reflect the uniqueID that is automatically generated?
-            %true [default]: the same analysis can be performed multiple times and none will be overwritten
-            %false: the next time that this analysis is run, previous data will be overwritten
-            addParameter(p,'collateFun','');                                %allow user to specify a function that knows how to collate their data
-            addParameter(p,'outputFolder',[],@ischar);                      %an outputFolder(with subfolders) to allow the user to keep their analysis organized and distinguishable in their folder
-            addParameter(p,'addJobName',[],@ischar);                        %additional info that will be part of the jobName on the cluster
-            addParameter(p,'from',7);                                       %if data is a jobID or job(Group)Name, then specify how many days ago to original dataset was submitted
-            %default: 7 days ago;
-            addParameter(p,'startupDirectory','',@ischar);% Matlab will startup in this directory (-sd command line argument)
-            addParameter(p,'debug',false);
-
-            %if a task of a whole taskBatch fails, then we don't want to resubmit the whole Batch
-            %this parameter should not be used directly, it should only be used by o.retry
-            addParameter(p,'resubmitTaskNr',false);
-            parse(p,varargin{:});
-
-            %if tasks has not been provided then this function cannot run
-            if isempty(args(1).tasks)
-                error('The input arguments do not have a field "tasks". Use that field to provide instructions for what each node/worker is supposed to do')
-            end
-
-            %check if 'data' is real data or if it just refers to an already existing dataset
-            switch dataType
-                case 'jobID' %if we only know the jobID, then we need to find the jobName to find out what folder the data got uploaded to for that previous job
-                    tempCluster = mslurm; % Get the default mslurm
-                    tempCluster.sacct('starttime',datetime("now")-p.Results.from); %Update sacct
-                    allJobIDs = {tempCluster.jobs.JobID};
-                    targetJobIDIdx = find(contains(allJobIDs,data));
-                    if isempty(targetJobIDIdx)
-                        error(['No job with the ID ' data ' could be found within the last ' num2str(p.Results.from) ' days'])
-                    end
-                    allJobNames = {tempCluster.jobs.JobName};
-                    targetJobName = allJobNames{targetJobIDIdx(1)};
-                    targetJobFolder = strrep(fullfile(o.remoteStorage,erase(targetJobName,'-taskBatch'),'/'),'\','/');
-                    remoteDataFile = [targetJobFolder erase(targetJobName,'-taskBatch') '_data.mat'];
-                    localDataFile = [o.localStorage erase(targetJobName,'-taskBatch') '_data.mat']; %#ok<NASGU>
-                case 'jobName' %if we know the jobName then we basically know the folder already
-                    targetJobFolder = strrep(fullfile(o.remoteStorage,erase(data,'-taskBatch'),'/'),'\','/');
-                    targetJobName = data;
-                    remoteDataFile = [targetJobFolder erase(data,'-taskBatch') '_data.mat'];
-                    localDataFile = [o.localStorage erase(data,'-taskBatch') '_data.mat']; %#ok<NASGU>
-                case 'realData'
-                    remoteDataFile = [];
-            end
-
-            %deal with different ways to specify a collateFunction
-            if ~isempty(p.Results.collateFun)
-                collateFun = getByteStreamFromArray(char(p.Results.collateFun));
-                collateFun = num2str(collateFun);
-            else
-                collateFun = [];
-            end
-
-            %check if folder and data still exist
-            if ~isempty(remoteDataFile)
-                if o.exist(targetJobFolder,'dir')
-                    if ~o.exist([targetJobFolder erase(targetJobName,'-taskBatch') '_data.mat'])
-                        error(['the data file "' erase(targetJobName,'-taskBatch') '_data.mat"  does not exist anymore. You need to upload data for your job']);
-                    else
-                        mslurm.log('... data found')
-                    end
-                else
-                    error(['the folder "' targetJobFolder '"  does not exist anymore. You need to upload data for your job']);
-                end
-            end
-
-            %create the jobGroup that is send to the cluster
-            %create a unique jobName for the group of tasks that is run on the cluster
-            %but users are allowed to name the final output file, which
-            %will be reflected in the name of the jobGroup
-            id = char(datetime("now",'Format','yyMMdd_HHmmSS'));
-
-            %where should the collated result from the taskBatch be saved
-            if ~isempty(p.Results.outputFolder) %the user knows exactly where the result should end up
-                if p.Results.uniqueOutputName
-                    finalFolderName =  [getenv('USERNAME') '/' p.Results.outputFolder id '/'];
-                else
-                    finalFolderName =  [ getenv('USERNAME') '/' p.Results.outputFolder];
-                end
-            else
-                if ~isempty(p.Results.addJobName) %the user doesn't have a specific folder structure in mind
-                    %but a clear idea how the job should be called and we
-                    %can use that to create that final folder
-                    if p.Results.uniqueOutputName
-                        finalFolderName =  [getenv('USERNAME') '/' p.Results.addJobName '_' id '/'];
-                    else
-                        finalFolderName =  [getenv('USERNAME') '/' p.Results.addJobName '/'];
-                    end
-                else %the user has now opinion on how to call the job and where to save the result
-                    %this might be problematic if the same function will run on future jobs
-                    %because those separete results will be hard to distinguish
-                    finalFolderName =  [getenv('USERNAME') '/' fun '_' id '/'];
-                    mslurm.log('consider specifying either "jobName" or "outputFolder" or both so make your job and/or the folder where the results be saved more distinguishable. In particular if you are going to use this function for future but different jobs')
-                end
-            end
-
-            %how should the job be called on the cluster
-            if ~isempty(p.Results.addJobName)
-                jobGroupName = cat(2,fun,'_', p.Results.addJobName, '_', id);
-            else
-                jobGroupName = cat(2,fun,'_', id);
-            end
-
-            %create directories on the cluster where temporary and final results can be stored
-            %1. a folder in the headRootDir folder where the collated
-            %result will be saved for good
-            %1.1 check if the users's folder exists and create
-            %that folder if it doesnt
-            userFolderDir = strrep(fullfile(o.headRootDir, getenv('USERNAME')),'\','/');
-            if ~o.exist(userFolderDir,'dir')
-                result = o.command(['mkdir ' userFolderDir]);
-            end
-            %1.2 create the folder for the collated result within the user's folder
-            finalFolderDir = strrep(fullfile(o.headRootDir,finalFolderName, '/'),'\','/');
-            %since we cannot add folders with many subfolders
-            %in one go, we need to split this into a loop
-            tempFinalFolder =  erase(finalFolderDir,userFolderDir);
-            appendedFolderName = userFolderDir;
-            folderIdx = strfind(tempFinalFolder,'/');
-            startIdx = 1;
-            subFolderNames = cell(1,numel(folderIdx)-1);
-            for folderCntr = 1:numel(folderIdx)
-                subFolderNames{folderCntr} = tempFinalFolder(startIdx:folderIdx(folderCntr));
-                startIdx = folderIdx(folderCntr)+1;
-                appendedFolderName = [appendedFolderName subFolderNames{folderCntr}]; %#ok
-                if ~o.exist(appendedFolderName,'dir')
-                    result = o.command(['mkdir ' appendedFolderName]);
-                end
-            end
-
-
-            %2. create a folder in the remoteStorage to save the task results from each worker,
-            jobGroupDir = strrep(fullfile(o.remoteStorage,jobGroupName),'\','/');
-            if ~o.exist(jobGroupDir,'dir')
-                result = o.command(['mkdir ' jobGroupDir]);
-            end
-
-
-            %create a file with input arguments that get passed to the function
-            %that will run on the cluster
-            argsFile = [jobGroupName '_args.mat'];
-            % Save a local copy of the args
-            localArgsFile = fullfile(o.localStorage,argsFile);
-            remoteArgsFile = strrep(fullfile(o.remoteStorage,jobGroupName,argsFile),'\','/');
-            save(localArgsFile,'args','-v7.3'); % 7.3 needed to allow partial loading of the args in each worker.
-            % Copy the args file to the cluster
-            if ~p.Results.debug
-                o.put(localArgsFile,jobGroupDir);
-            end
-
-            %specify the file(s) that the function should run on and upload
-            %it to the cluster (if necessary)
-            if isempty(remoteDataFile)
-                % Save a local copy of the input data
-                localDataFile = fullfile(o.localStorage,[jobGroupName '_data.mat']);
-                remoteDataFile = strrep(fullfile(o.remoteStorage,jobGroupName,[jobGroupName '_data.mat']),'\','/');
-                save(localDataFile,'data','-v7.3'); % 7.3 needed to allow partial loading of the data in each worker.
-                % Copy the data file to the cluster
-                if ~p.Results.debug
-                    o.put(localDataFile,jobGroupDir);
-                end
-            end
-
-            %run all tasks as an arrayJob
-            jobID = o.sbatch('jobName',[jobGroupName '-taskBatch'] ,'uniqueID','','batchOptions',p.Results.batchOptions,'mfile','mslurm.taskBatchRun','mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userDir',userFolderDir},'runOptions',p.Results.runOptions,'nrInArray',nrInArray,'debug',p.Results.debug,'startupDirectory',p.Results.startupDirectory);
-
-
-            %start a collate job
-            if ~isempty(jobID)  %jobs have been submitted succesfully
-                dependency = sprintf('afterany:%s',num2str(jobID));  %execute this after the arrayJob has been succesfully submitted
-
-                %run the collateJob (via sbatch, which will run taskBatchRun)
-                collateJobId  = o.sbatch('jobName',[jobGroupName '-collate'],'uniqueID','','batchOptions',cat(2,p.Results.batchOptions,{'dependency',dependency}),'mfile','mslurm.taskBatchRun','mfileExtraInput',{'argsFile',remoteArgsFile,'mFile',collateFun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userDir',finalFolderDir,'totalNrTasks',nrInArray},'runOptions',p.Results.runOptions,'nrInArray',1,'taskNr',0,'debug',p.Results.debug,'startupDirectory',p.Results.startupDirectory);
-            end
-
-            jobInfo.taskIds = jobID;
-            jobInfo.collateJobId = collateJobId;
-            jobInfo.result = result;
-
-        end
-
-
-        function [jobId,result] = sbatch(o,varargin)
+        function [jobId,result] = sbatch(o,jobName,local,remote, pv)
             % Interface to the sbatch command on the cluster.
             % The batch file for SLURM is stored in the local
             % storage, copied to the cluster, and then queued.
@@ -1232,152 +966,129 @@ classdef mslurm < handle
             %
             % See also mslurm/feval or mslurm.batch for example functions that use
             % mslurm/sbatch to submit jobs to the scheduler.
-
-            p = inputParser;
-            p.addParameter('jobName',o.uid,@ischar );
-            p.addParameter('batchOptions',o.batchOptions,@iscell);
-            p.addParameter('runOptions','',@ischar);
-            p.addParameter('mfile','',@ischar);
-            p.addParameter('mfileExtraInput',{},@iscell); % pv pairs
-            p.addParameter('command','',@ischar);
-            p.addParameter('nrInArray',0,@(x) (isnumeric(x) && isscalar(x)));
-            p.addParameter('debug',false,@islogical);
-            p.addParameter('retryBatchFile','',@ischar);
-            p.addParameter('taskNr',0,@isnumeric);
-            p.addParameter('startupDirectory',o.startupDirectory,@ischar);% Matlab will startup in this directory (-sd command line argument)
-            p.addParameter('workingDirectory',o.workingDirectory,@ischar);
-            p.addParameter('addPath',o.addPath,@(x) ischar(x) || iscellstr(x)); % Add these folders to the Matlab path by calling addpath(x)
-            p.addParameter('env',o.env,@isstring); % Environment variables to read on the client and set on the cluster.
-            p.parse(varargin{:});
-            if ischar(p.Results.addPath)
-                addPth = {p.Results.addPath};
-            else
-                addPth = p.Results.addPath;
-            end
-            if isempty(p.Results.retryBatchFile)
-                %Construct a new batch file for sbatch
-                jobName = p.Results.jobName;
-                remoteJobDir = strrep(fullfile(o.remoteStorage,jobName),'\','/');
-                localJobDir = fullfile(o.localStorage,jobName);
-            
-            
-                if ~isempty(p.Results.mfile)
-                    % Wrap an mfile
-                    extraIn = '';
-                    for i=1:2:length(p.Results.mfileExtraInput)
-                        if ischar(p.Results.mfileExtraInput{i+1}) || isstring(p.Results.mfileExtraInput{i+1})
-                            strValue = ['''' p.Results.mfileExtraInput{i+1} ''''];
-                        elseif isnumeric(p.Results.mfileExtraInput{i+1})
-                            strValue = ['[' num2str(p.Results.mfileExtraInput{i+1}) ']'];
-                        else
-                            error('Extra input to the mfile must be parm/value pairs. Value can only be numeric or string');
-                        end
-                        extraIn = cat(2,extraIn,',''', p.Results.mfileExtraInput{i},''',',strValue);
-                    end
-
-                    if ~isempty(p.Results.startupDirectory)
-                        sd = ['-sd '  p.Results.startupDirectory];
-                    else
-                        sd = '';
-                    end
-                    addPth =strjoin(cat(2,addPth,o.mslurmFolder),':');
-                    if ~isempty(addPth)
-                        addPathStr = sprintf('addpath(''%s'')',addPth);
-                    else
-                        addPathStr = '';
-                    end
-
-                    if isempty(p.Results.workingDirectory)
-                        % Run in remoteStorage directoryc
-                        wd = remoteJobDir;
-                    else
-                        % Run in specified working Directory
-                        wd = p.Results.workingDirectory;
-                    end
-                    if p.Results.nrInArray>=1
-                        runStr = ['%s/matlab  ' sd ' -nodisplay -nodesktop -r  "try;%s;cd ''%s'';%s($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID %s);catch me;mslurm.exit(me);end;mslurm.exit(0);"'];
-                        run = sprintf(runStr,o.matlabRoot,addPathStr,wd,p.Results.mfile,extraIn);
-                    else
-                        runStr = ['%s/matlab ' sd ' -nodisplay -nodesktop -r "try;%s;cd ''%s''; %s($SLURM_JOB_ID,%d %s);catch me;mslurm.exit(me);end;mslurm.exit(0);"'];
-                        run = sprintf(runStr,o.matlabRoot,addPathStr,wd,p.Results.mfile,p.Results.taskNr,extraIn);
-                    end
-                elseif ~isempty(p.Results.command)
-                    % The user knows what to do. Run this command as is with srun.
-                    run = p.Results.command;
-                else
-                    error('command and mfile cannot both be empty...');
-                end
-
-
-                  if p.Results.nrInArray>=1
-                    % Ensure that array job numbers generated by slurm are
-                    % base-1 (default is base zero)
-                    batchOpts = cat(2,p.Results.batchOptions,{'array',['1-' num2str(p.Results.nrInArray)]});
-                    outFile = [mslurm.STDOUTFILE '_%a.out'];
-                else
-                    batchOpts = p.Results.batchOptions;
-                    outFile = mslurm.STDOUTFILE;
-                end
-                % Options with empty values are removed.
-                empty = find(cellfun(@isempty,batchOpts(2:2:end)));
-                batchOpts([2*empty-1 2*empty])= [];
-
-                batchFile = mslurm.SBATCHFILE;                
-                fid  =fopen(fullfile(localJobDir,mslurm.SBATCHFILE) ,'w'); % no t (unix line endings are needed)
-                fprintf(fid,'#!/bin/bash\n');
-                batchOpts = cat(2,batchOpts, {'job-name',jobName,'output',outFile,'error',outFile});
-                for opt=1:2:numel(batchOpts)
-                    if isempty(batchOpts{opt+1})
-                        fprintf(fid,'#SBATCH --%s\n',batchOpts{opt});
-                    elseif isnumeric(batchOpts{opt+1})
-                        fprintf(fid,'#SBATCH --%s=%d\n',batchOpts{opt},batchOpts{opt+1});
-                    elseif ischar(batchOpts{opt+1})
-                        isSpace  = batchOpts{opt+1}==' ';
-                        if any(isSpace)
-                            batchOpts{opt+1}(isSpace) = '';
-                            mslurm.log(['Removing spaces from Slurm Batch Option ''' batchOpts{opt} ''' now set to:''' batchOpts{opt+1} '''']);
-                        end
-                        fprintf(fid,'#SBATCH --%s=%s\n',batchOpts{opt},batchOpts{opt+1});
-                    else
-                        error('sbatch options should be char or numeric');
-                    end
-                end
-                % Read the environment, and package it to pass to sbatch.
-                % Note that the passed env are additional to the ones
-                % already defined on the cluster (and the ones on the
-                % cluster take precedence).
-                if p.Results.env ~=""
-                    isLocalEnv = ~contains(p.Results.env,"=");
-                    val = getenv(p.Results.env(isLocalEnv));
-                    str = strjoin(strcat(p.Results.env(isLocalEnv),'=',val),',');
-                    str = strjoin([str  p.Results.env(~isLocalEnv)],',');
-                    fprintf(fid,'#SBATCH --export=ALL,%s\n',str);
-                end
-                fprintf(fid,'srun %s %s\n',p.Results.runOptions,run);
-                fclose(fid);
-            else
-
-                %TODO extract job file 
-                % Use the specified batch file. Extract the job name.\
-                batchFile = p.Results.retryBatchFile;
-                % fid = fopen(fullfile(o.localStorage,batchFile));
-                % while (fid >0 && = fgetl(fid) )
-                % end
-                jobName   = strsplit(batchFile,'.');
-                jobName = jobName{1};
+            arguments
+                o (1,1) mslurm
+                jobName (1,1) string
+                local (1,1) string
+                remote (1,1) string
+                pv.batchOptions (1,:) cell = o.batchOptions
+                pv.runOptions (1,1) string = ""
+                pv.mfile (1,1) string = ""
+                pv.mfileExtraInput (1,:) cell = {}
+                pv.command (1,1) string = ""
+                pv.nrInArray (1,1) double = 0
+                pv.debug (1,1) logical  = false
+                pv.taskNr (1,1) double  = 0
+                pv.startupDirectory (1,1) string = o.startupDirectory;
+                pv.workingDirectory string = o.workingDirectory;
+                pv.addPath (:,:) string = o.addPath;
+                pv.env (1,1) string = o.env;
             end
 
-            if p.Results.debug
+
+
+            if pv.mfile ~=""
+                % Wrap an mfile
+                extraIn = '';
+                for i=1:2:length(pv.mfileExtraInput)
+                    if ischar(pv.mfileExtraInput{i+1}) || isstring(pv.mfileExtraInput{i+1})
+                        strValue = ['''' pv.mfileExtraInput{i+1} ''''];
+                    elseif isnumeric(pv.mfileExtraInput{i+1})
+                        strValue = ['[' num2str(pv.mfileExtraInput{i+1}) ']'];
+                    else
+                        error('Extra input to the mfile must be parm/value pairs. Value can only be numeric or string');
+                    end
+                    extraIn = cat(2,extraIn,',''', pv.mfileExtraInput{i},''',',strValue);
+                end
+
+                if pv.startupDirectory==""
+                    sd = '';
+                else
+                    sd = ['-sd '  pv.startupDirectory];
+                end
+
+                addPth =pv.addPath + ":" + o.mslurmFolder;
+                addPathStr = sprintf('addpath(''%s'')',addPth);
+
+                if pv.workingDirectory ==""
+                    % Run in remoteStorage directoryc
+                    wd = remote;
+                else
+                    % Run in specified working Directory
+                    wd = pv.workingDirectory;
+                end
+                if pv.nrInArray>=1
+                    runStr = ['%s/matlab  ' sd ' -nodisplay -nodesktop -r  "try;%s;cd ''%s'';%s($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID %s);catch me;mslurm.exit(me);end;mslurm.exit(0);"'];
+                    run = sprintf(runStr,o.matlabRoot,addPathStr,wd,pv.mfile,extraIn);
+                else
+                    runStr = ['%s/matlab ' sd ' -nodisplay -nodesktop -r "try;%s;cd ''%s''; %s($SLURM_JOB_ID,%d %s);catch me;mslurm.exit(me);end;mslurm.exit(0);"'];
+                    run = sprintf(runStr,o.matlabRoot,addPathStr,wd,pv.mfile,pv.taskNr,extraIn);
+                end
+            elseif pv.command ~=""
+                % The user knows what to do. Run this command as is with srun.
+                run = pv.command;
+            else
+                error('command and mfile cannot both be empty...');
+            end
+
+
+            if pv.nrInArray>=1
+                % Ensure that array job numbers generated by slurm are
+                % base-1 (default is base zero)
+                batchOpts = cat(2,pv.batchOptions,{'array',['1-' num2str(pv.nrInArray)]});
+                outFile = [mslurm.STDOUTFILE '_%a.out'];
+            else
+                batchOpts = pv.batchOptions;
+                outFile = mslurm.STDOUTFILE;
+            end
+            % Options with empty values are removed.
+            empty = find(cellfun(@isempty,batchOpts(2:2:end)));
+            batchOpts([2*empty-1 2*empty])= [];
+
+            batchFile = mslurm.SBATCHFILE;
+            fid  =fopen(fullfile(local,mslurm.SBATCHFILE) ,'w'); % no t (unix line endings are needed)
+            fprintf(fid,'#!/bin/bash\n');
+            batchOpts = cat(2,batchOpts, {'job-name',jobName,'output',outFile,'error',outFile});
+            for opt=1:2:numel(batchOpts)
+                if isempty(batchOpts{opt+1})
+                    fprintf(fid,'#SBATCH --%s\n',batchOpts{opt});
+                elseif isnumeric(batchOpts{opt+1})
+                    fprintf(fid,'#SBATCH --%s=%d\n',batchOpts{opt},batchOpts{opt+1});
+                elseif ischar(batchOpts{opt+1})
+                    isSpace  = batchOpts{opt+1}==' ';
+                    if any(isSpace)
+                        batchOpts{opt+1}(isSpace) = '';
+                        mslurm.log(['Removing spaces from Slurm Batch Option ''' batchOpts{opt} ''' now set to:''' batchOpts{opt+1} '''']);
+                    end
+                    fprintf(fid,'#SBATCH --%s=%s\n',batchOpts{opt},batchOpts{opt+1});
+                else
+                    error('sbatch options should be char or numeric');
+                end
+            end
+            % Read the environment, and package it to pass to sbatch.
+            % Note that the passed env are additional to the ones
+            % already defined on the cluster (and the ones on the
+            % cluster take precedence).
+            if pv.env ~=""
+                isLocalEnv = ~contains(pv.env,"=");
+                val = getenv(pv.env(isLocalEnv));
+                str = strjoin(strcat(pv.env(isLocalEnv),'=',val),',');
+                str = strjoin([str  pv.env(~isLocalEnv)],',');
+                fprintf(fid,'#SBATCH --export=ALL,%s\n',str);
+            end
+            fprintf(fid,'srun %s %s\n',pv.runOptions,run);
+            fclose(fid);
+
+
+            if pv.debug
                 mslurm.log ('Debug mode. Nothing will be submitted to SLURM')
-                edit (fullfile(localJobDir,batchFile));
+                edit (fullfile(local,batchFile));
                 jobId=0;result = 'debug mode';
             else
-                if isempty(p.Results.retryBatchFile)
-                    % Copy the flie to the cluster
-                    o.put(fullfile(localJobDir,batchFile),remoteJobDir);
-                end
+                % Copy the flie to the cluster
+                o.put(fullfile(local,batchFile),remote);
                 % Start the sbatch
-                [result,err] = o.command(sprintf('cd %s ;sbatch %s/%s',remoteJobDir,remoteJobDir,batchFile));
+                [result,err] = o.command(sprintf('cd %s ;sbatch %s/%s',remote,remote,batchFile));
                 jobId = str2double(regexp(result{1},'\d+','match'));
                 if iscell(err)
                     err = err{1};
@@ -1403,7 +1114,6 @@ classdef mslurm < handle
             end
             cmd = ['scancel ' sprintf('%s ',jobIds{:})];
             result = o.command(cmd);
-            %mslurm.log(result{1})
         end
 
 
@@ -1432,297 +1142,8 @@ classdef mslurm < handle
                 list = {};
                 mslurm.log('No jobs found')
             else
-                if isempty(p.Results.jobId)
-                    state = o.failState;
-                    if isempty(p.Results.selection)
-                        jobIx    = find(state > 0 & state < p.Results.maxNrFails);
-                    else
-                        jobIx    = find(state > 0 & state < p.Results.maxNrFails & ismember(1:o.nrJobs,p.Results.selection));
-                    end
-                else
-                    jobIx = find(ismember({o.jobs.JobID},p.Results.jobId));
-                end
-                jobIDs = {o.jobs(jobIx).JobID};
+                %TODO rewrite using scontrol requeue jobID_arrayID
 
-                % Four kinds of jobs, with different retry needs
-                isArray = cellfun(@(x) (any(x=='_')),jobIDs);
-                isTaskBatch =    isArray & contains({o.jobs(jobIx).JobName},'taskBatch');
-                isRegularArray = isArray & ~isTaskBatch;
-                isRegularJob =~(isTaskBatch | isRegularArray);
-                % TODO: this depends on the ordering of the jobs.... Seems a risky strategy?
-                if jobIx>1
-                    isTaskBatchCollate = (contains({o.jobs(jobIx-1).JobName},'taskBatch') & contains({o.jobs(jobIx).JobName},'-collate')) | contains({o.jobs(jobIx).JobName},'-tbRCollate');
-                else
-                    isTaskBatchCollate =false;
-                end
-                %
-                if isTaskBatchCollate
-                    isTaskBatch = 1;
-                    isRegularArray = 0;
-                    isRegularJob = 0;
-                end
-
-
-                %% Retry regular jobs
-                if any(isRegularJob)
-                    jobIx = jobIx(isRegularJob);  % Regular job
-                    list = {o.jobs(jobIx).JobName};
-
-                    alreadyRetried = {};
-                    for j=jobIx
-                        batchFile = mslurm.decodeComment(o.jobs(j).Comment,'sbatch');
-                        if length(batchFile)~=1 || isempty(batchFile{1})
-                            error('The comment field should contain the batch file...');
-                        else
-                            batchFile = batchFile{1};
-                        end
-                        if ~ismember(batchFile,alreadyRetried)
-                            o.sbatch('retryBatchFile',batchFile);
-                            alreadyRetried = cat(2,alreadyRetried,batchFile);
-                        end
-                    end
-                end
-                %% Retry taskBatchJobs and taskBatch collateJobs
-                if any(isTaskBatch)
-                    taskBatchJobIx = jobIx(isTaskBatch);
-                    list = {o.jobs(taskBatchJobIx).JobName};
-
-                    %only one taskBatch should be retried at a time
-                    uTaskBatch = unique(list);
-                    if length(uTaskBatch)>1
-                        mslurm.log('Sorry, only retry one taskBatch at a time. Please retry separately. \n');
-                    else
-
-                        if isTaskBatchCollate
-                            resubmitAnswer = questdlg('Resubmit AS IS, or change Imputs?', ...
-                                'Resubmission Options', ...
-                                'Resubmit','Change Inputs','Cancel','Cancel');
-
-                            if strcmpi(resubmitAnswer,'Change Inputs')
-                                elementInArray = 1;
-                                locFullFile = getFile(o,jobIDs{1},'type','sh');
-                                [pth,locFile] = fileparts(locFullFile);
-                                newFile = strsplit(locFile,'-');
-                                newBatchFile = [newFile{1} '-tbRCollate.sh'];
-                                srcFid =fopen(locFullFile,'r');
-                                trgFid =fopen(fullfile(pth,newBatchFile),'w');
-                                while (true)
-                                    line = fgetl(srcFid);
-                                    if line==-1;break;end
-                                    if contains(line,'#SBATCH --array')
-                                        continue;%skip
-                                    elseif contains(line,'#SBATCH --output') || contains(line,'#SBATCH --error')
-                                        line = strrep(line,'%A_%a.out','%A.out');
-                                    elseif contains(line,'#SBATCH --job-name')
-                                        tmp = strsplit(line,'=');
-                                        tmp = strsplit(tmp{2},'-');
-                                        line = ['#SBATCH --job-name=' tmp{1} '-tbRCollate'];
-                                    elseif contains(line,'#SBATCH --comment')
-                                        line = ['#SBATCH --comment=sbatch:' newBatchFile];
-                                    elseif contains(line,'srun  matlab')
-                                        line = strrep(line,'$SLURM_ARRAY_TASK_ID',num2str(elementInArray));
-                                    elseif contains(line,'#SBATCH --time')
-                                        startInputIdx = strfind(line,'time=')+5;
-                                        %  if strcmpi(resubmitAnswer,'Change Inputs')
-                                        jobParmPrompt = {'wall-time:'};
-                                        dlgtitle = 'Change Wall-Time?';
-                                        dims = [1 35];
-                                        definput = {line(startInputIdx:end)};
-                                        jobParmAnswer = inputdlg(jobParmPrompt,dlgtitle,dims,definput);
-                                        line = ['#SBATCH --time=' jobParmAnswer{1}];
-                                        % else
-                                        %  line = ['#SBATCH --time' line(startInputIdx:end)];
-                                        % end
-
-                                    elseif contains(line,'#SBATCH --mem')
-                                        startInputIdx = strfind(line,'mem=')+4;
-                                        % if strcmpi(resubmitAnswer,'Change Inputs')
-                                        jobParmPrompt = {'memory (GB)'};
-                                        dlgtitle = 'Change Memory?';
-                                        dims = [1 35];
-                                        definput = {line(startInputIdx:end)};
-                                        jobParmAnswer = inputdlg(jobParmPrompt,dlgtitle,dims,definput);
-                                        line = ['#SBATCH --mem=' jobParmAnswer{1}];
-                                        % else
-                                        % line = '#SBATCH --time=12:0:00';
-                                        % end
-
-                                    elseif contains(line,'#SBATCH --partition')
-                                        %startInputIdx = strfind(line,'partition=')+10;
-                                        %if strcmpi(resubmitAnswer,'Change Inputs')
-                                        resubmitPartitionAnswer = questdlg('Which Partition to Resubmit to?', ...
-                                            'Partition Options', ...
-                                            'main','nm3','main,nm3','main,nm3');
-                                        line = ['#SBATCH --partition=' resubmitPartitionAnswer];
-                                        %  else
-                                        %    line = ['#SBATCH --partition=' line(startInputIdx:end)];
-                                        % end
-                                    end
-                                    fprintf(trgFid,'%s\n',line);
-                                end
-                                fclose(trgFid);
-                                fclose(srcFid);
-
-                                o.put(fullfile(o.localStorage,newBatchFile),o.remoteStorage);
-                                o.sbatch('retryBatchFile',newBatchFile);
-
-                            elseif strcmpi(resubmitAnswer,'Resubmit')
-
-                                batchFile = mslurm.decodeComment(o.jobs(jobIx).Comment,'sbatch');
-                                if length(batchFile)~=1 || isempty(batchFile{1})
-                                    error('The comment field should contain the batch file...');
-                                else
-                                    batchFile = batchFile{1};
-                                end
-
-                                o.sbatch('retryBatchFile',batchFile);
-
-
-                            end
-                        else
-
-                            resubmitAnswer = questdlg('What should be resubmitted?', ...
-                                'Resubmission Options', ...
-                                'Complete TaskBatch','Selected Task Nr(s)','Cancel','Cancel');
-
-                            % Handle response
-                            switch resubmitAnswer
-                                case 'Complete TaskBatch'
-                                    batchFile = mslurm.decodeComment(o.jobs(taskBatchJobIx(1)).Comment,'sbatch');
-                                    batchFile = batchFile{1};
-                                    o.sbatch('retryBatchFile',batchFile);
-
-                                case 'Selected Task Nr(s)'
-                                    %separate jobID from taskID
-                                    taskIds = {o.jobs(taskBatchJobIx).JobID};
-                                    taskBatchId = taskIds{1}(1:strfind(taskIds{1},'_')-1);
-                                    taskIds = strrep(taskIds,[taskBatchId '_'],'');
-                                    taskIds = cellfun(@str2num,taskIds);
-
-                                    resubJobName = strrep(uTaskBatch{1},'-taskBatch','');
-
-                                    jobGroupDir = [o.remoteStorage '/' resubJobName];
-                                    %remoteDataPath =  [jobGroupDir '/' resubJobName];
-                                    fun = resubJobName(1:strfind(resubJobName,'_')-1);
-                                    userFolderDir = strrep(fullfile(o.headRootDir,[getenv('USERNAME') '/']),'\','/');
-
-
-                                    %recreate the input arguments to sbatch form the original shell file
-                                    originalInputArgsFile = fileread([o.localStorage '\' resubJobName '-taskBatch.sh']);
-                                    originalInputArgsByLine = splitlines(originalInputArgsFile);
-
-                                    %the arguments we want are
-                                    extractArgs = {'--time'; '--mem'; ' -sd '; 'dataFile'; 'argsFile'};
-
-                                    %this assumes that the order of the dataFile and argsFile input arguments will not change in the future
-                                    for extractArgCntr = 1:length(extractArgs)
-                                        whichLine = find(contains(originalInputArgsByLine,extractArgs{extractArgCntr}));
-                                        switch extractArgs{extractArgCntr}
-
-                                            case '--time'
-                                                wallTime = originalInputArgsByLine{whichLine}(strfind(originalInputArgsByLine{whichLine},'=')+1:end);
-
-                                            case '--mem'
-                                                memorySize = originalInputArgsByLine{whichLine}(strfind(originalInputArgsByLine{whichLine},'=')+1:end);
-
-                                            case ' -sd '
-                                                firstIdx = strfind(originalInputArgsByLine{whichLine},extractArgs{extractArgCntr})+5;
-                                                subString = originalInputArgsByLine{whichLine}(firstIdx:end);
-                                                lastIdx = strfind(subString,'-nodisplay')-2;
-                                                startupDir = subString(1:lastIdx);
-
-                                            case 'dataFile'
-                                                firstIdx = strfind(originalInputArgsByLine{whichLine},extractArgs{extractArgCntr})+11;
-                                                subString = originalInputArgsByLine{whichLine}(firstIdx:end);
-                                                lastIdx =  strfind(subString,'argsFile')-4;
-                                                dataFile = subString(1:lastIdx);
-
-                                            case 'argsFile'
-                                                firstIdx = strfind(originalInputArgsByLine{whichLine},extractArgs{extractArgCntr})+11;
-                                                subString = originalInputArgsByLine{whichLine}(firstIdx:end);
-                                                lastIdx =  strfind(subString,'mFile')-4;
-                                                argsFile = subString(1:lastIdx);
-
-                                        end
-                                    end
-
-                                    %ask if any value should be changed
-                                    jobParmPrompt = {'memory (GB):','wall-time:'};
-                                    dlgtitle = 'Need to change Job Parameters?';
-                                    dims = [1 50];
-                                    definput = {memorySize,wallTime};
-                                    jobParmAnswer = inputdlg(jobParmPrompt,dlgtitle,dims,definput);
-                                    memorySize = jobParmAnswer{1};
-                                    wallTime = jobParmAnswer{2};
-
-                                    %submit every selected task
-                                    for taskCntr = 1:numel(taskIds)
-                                        o.sbatch('jobName',[resubJobName '-reBatch_task_' num2str(taskIds(taskCntr))],'uniqueID','','batchOptions',{'time',wallTime,'partition','nm3,main','mem',memorySize},'mfile','mslurm.taskBatchRun','mfileExtraInput',{'dataFile',dataFile,'argsFile',argsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',jobGroupDir,'userDir',userFolderDir},'runOptions','','nrInArray',0,'taskNr',taskIds(taskCntr),'debug',false,'startupDirectory',startupDir);
-                                    end
-
-                                case 'Cancel'
-                                    mslurm.log('Nothing to submit then. \n');
-                                otherwise
-                                    mslurm.log('Nothing to submit then. \n');
-
-                            end
-                        end
-                    end
-                end
-
-                %% Retry regular array jobs  (as regular non-array jobs)
-                if any(isRegularArray)
-                    arrayJobIx = jobIx(isRegularArray);
-                    list = {o.jobs(arrayJobIx).JobName};
-                    for j=arrayJobIx
-                        thisJobID = o.jobs(j).JobID;
-                        tmp = strsplit(thisJobID,'_');
-                        %arrayJobID = tmp{1};
-                        elementInArray = tmp{2};
-                        batchFile = mslurm.decodeComment(o.jobs(j).Comment,'sbatch');
-                        if length(batchFile)~=1 || isempty(batchFile{1})
-                            error('The comment field should contain the batch file...');
-                        else
-                            batchFile = batchFile{1}; %#ok<NASGU>
-                        end
-                        % Make a copy
-                        locFullFile = getFile(o,thisJobID,'type','sh');
-                        [pth,locFile] = fileparts(locFullFile);
-                        newFile = strsplit(locFile,'-');
-                        newBatchFile = [newFile{1} '-R' elementInArray '.sh'];
-                        srcFid =fopen(locFullFile,'r');
-                        trgFid =fopen(fullfile(pth,newBatchFile),'w');
-                        while (true)
-                            line = fgetl(srcFid);
-                            if line==-1;break;end
-                            if contains(line,'#SBATCH --array')
-                                continue;%skip
-                            elseif contains(line,'#SBATCH --output') || contains(line,'#SBATCH --error')
-                                line = strrep(line,'%A_%a.out','%A.out');
-                            elseif contains(line,'#SBATCH --job-name')
-                                tmp = strsplit(line,'=');
-                                tmp = strsplit(tmp{2},'-');
-                                line = ['#SBATCH --job-name=' tmp{1} '-R' elementInArray];
-                            elseif contains(line,'#SBATCH --comment')
-                                line = ['#SBATCH --comment=sbatch:' newBatchFile];
-                            elseif contains(line,'srun  matlab')
-                                line = strrep(line,'$SLURM_ARRAY_TASK_ID',elementInArray);
-                            elseif contains(line,'#SBATCH --time')
-                                line = '#SBATCH --time=12:0:00';
-                            end
-                            fprintf(trgFid,'%s\n',line);
-                        end
-                        fclose(trgFid);
-                        fclose(srcFid);
-
-                        o.put(fullfile(o.localStorage,newBatchFile),o.remoteStorage);
-
-                        %if ~ismember(batchFile,alreadyRetried)
-                        o.sbatch('retryBatchFile',newBatchFile);
-                        %     alreadyRetried = cat(2,alreadyRetried,batchFile);
-                        % end
-                    end
-                end
             end
         end
 
@@ -1824,10 +1245,9 @@ classdef mslurm < handle
                 end
                 arrayElement = extractAfter(o.jobs(ix(i)).JobID,'_');
                 if ~isempty(arrayElement)
-                    arrayElement = ['_' arrayElement];
+                    arrayElement = ['_' arrayElement]; %#ok<AGROW>
                 end
-                remoteFile= strrep(fullfile(o.remoteStorage,o.jobs(ix(i)).JobName,[filename arrayElement '.out']),'\','/');
-                               
+                remoteFile= unixfile(o.remoteStorage,o.jobs(ix(i)).JobName,[filename arrayElement '.out']);
                 localDir =fullfile(o.localStorage,o.jobs(ix(i)).JobName);
                 localFile{i} =fullfile(localDir,filename);
                 if ~exist(localFile{i},'file') || p.Results.forceRemote
@@ -2163,158 +1583,6 @@ classdef mslurm < handle
         end
 
 
-        function taskBatchRun(jobID,taskNr,varargin) %#ok
-            % This function is a modified version of fevalRun and runs on the cluster in response to
-            % a call to mslurm.taskBatch on the client.
-            % It is not meant to be called directly. See mslurm.taskBatch.
-            %
-            % It will run a specified mfile on an element of the specified data array
-            % INPUT:
-            % jobID = slurm job id
-            % taskNr = The number of this job in the array of jobs. This
-            % number is used to pick one item from the data array.
-            %
-            % Other properties are specified as parm/value pairs
-            %
-            % 'mfile'  - The Mfile that will be run,.
-            % 'datafile'  - File containing the that will be passed to
-            % mfile.
-            % 'argsFile'  - File containing the extra input arguments for
-            % the mfile
-            % 'nodeTempDir' - folder on the nodes where temporary
-            % information can be saved (e.g. /scratch)
-            % 'jobDir' - directory on the head node where the results are
-            % stored. (and later retrieved by mslurm.retrieve)
-            % 'taskData'  - if an array Job has been submitted then each worker receives a separate slice of data (default)
-            %               use '
-            try
-
-                p = inputParser;
-                addParameter(p,'dataFile','');
-                addParameter(p,'argsFile','');
-                addParameter(p,'mFile','');
-                addParameter(p,'nodeTempDir','');
-                addParameter(p,'jobDir','');
-                addParameter(p,'totalNrTasks','');
-                addParameter(p,'userDir','');
-                parse(p,varargin{:});
-
-                p.Results
-
-                %if this is a collate job, then the taskNr will be 0, otherwise
-                %it will be the taskNr out of the numbers 1:nrInArray
-
-                if ~isempty(p.Results.dataFile)
-                    %preload data and args to pass (slices/subsets) to workers
-                    dataMatFile = matfile(p.Results.dataFile) %#ok<NOPRT> % Matfile object for the data so that we can pass a slice
-                    dataMatFileInfo = whos(dataMatFile,'data') %#ok<NOPRT>
-                    argsMatFile = matfile(p.Results.argsFile) %#ok<NOPRT> % Matfile object for the args so that we can slect slices of of data
-
-                    %data is a cell array and args is a struct which
-                    %	contains the field 'tasks', which is a cell array
-                    % 	-> pass a subset of data, and a subset of data in args of whatever has the same size as data.
-                    %       Both subsets will be selected based on args.tasks{taskNr}
-
-                    fullArgsFile = argsMatFile.args %#ok<NOPRT>
-                    argsTemp = rmfield(fullArgsFile,'tasks') %#ok<NOPRT>
-                    subTasks = fullArgsFile.tasks{taskNr} %#ok<NOPRT>
-                    args = argsTemp %#ok<NOPRT>
-                    args.tasks = subTasks %#ok<NOPRT>
-
-                    uDataIdx = unique(args.tasks) %#ok<NOPRT>
-                    dataSlice.data = cell(dataMatFileInfo.size) %#ok<NOPRT>
-                    for dataColCntr = 1:size(dataSlice.data,2)
-                        for uDataCntr = 1:numel(uDataIdx)
-                            dataSlice.data{uDataIdx(uDataCntr),dataColCntr} = cell2mat(dataMatFile.data(uDataIdx(uDataCntr),dataColCntr));
-                        end
-                    end
-                    %now get rid of all cells in args that are not needed
-                    argsFieldNames = fieldnames(args);
-                    for fieldNameCntr = 1:length(argsFieldNames)
-                        if isequal(size(args.(argsFieldNames{fieldNameCntr})),size(dataSlice.data))
-                            args.(argsFieldNames{fieldNameCntr}) = cell(dataMatFileInfo.size);
-                            for colCntr = 1:size(dataSlice.data,2)
-                                useIdx =  find(~cellfun(@isempty,dataSlice.data(:,2)));
-                                args.(argsFieldNames{fieldNameCntr})(useIdx,colCntr) = fullArgsFile.(argsFieldNames{fieldNameCntr})(useIdx,colCntr);
-                            end
-                        end
-                    end
-
-
-                    result = feval(p.Results.mFile,dataSlice.data,args); % Pass all cells of the row to the mfile as argument (plus optional args)
-
-                    % Save the result in the jobDir as 1.result.mat, 2.result.mat, etc.
-                    mslurm.saveResult([num2str(taskNr) '.result.mat'],result,p.Results.nodeTempDir,p.Results.jobDir);
-
-                else %this means taskNr is 0 and we should collate instead
-                    result = mslurm.taskBatchCollate(p.Results.jobDir,'mFile',p.Results.mFile,'totalNrTasks',p.Results.totalNrTasks); % Pass all cells of the row to the mfile as argument (plus optional args)
-
-                    %transfer the collated result to the user's  folder
-                    mslurm.saveResult('collated.mat',result,p.Results.nodeTempDir,p.Results.userDir);
-                end
-
-            catch theCulprit
-                theCulprit %#ok<NOPRT>
-                theCulprit.stack(1)
-            end
-        end
-
-        function result = taskBatchCollate(jobDir,varargin)
-            %function result = taskBatchCollate(jobDir,varargin)
-            %
-            %collate results from calling taskBatch, either by combining them into a struct-array,
-            %or by using a function that the user specified for collating their results (see taskBatch).
-
-            try
-
-                p = inputParser;
-                addParameter(p,'mFile','');
-                addParameter(p,'totalNrTasks',1,@isnumeric);
-                parse(p,varargin{:});
-
-                resultFileNames = dir(jobDir);
-                resultFileNames = {resultFileNames.name};
-                match = contains(resultFileNames,'.result.mat');
-                resultFileNames = resultFileNames(match);
-
-                fileNrEndIdx = cell2mat(strfind(resultFileNames,'.result.mat'));
-
-                fileIdx = nan(1,length(resultFileNames));
-                tempResult(p.Results.totalNrTasks).result = [];
-
-                for fileCntr = 1:length(resultFileNames)
-                    fileIdx(fileCntr) = str2double(resultFileNames{fileCntr}(1:fileNrEndIdx(fileCntr)-1));
-                    tempResult(fileIdx(fileCntr)) = load([jobDir '/' num2str(fileIdx(fileCntr)) '.result.mat']);
-                    %simplify the output to just 'result(1:nrInArray).fieldnames
-                    %instead of result(1:nrInArray).result.fieldnames
-                    fieldNames = fieldnames(tempResult(fileIdx(fileCntr)).result);
-                    for fieldNameCntr = 1:length(fieldNames)
-                        preResult(fileIdx(fileCntr)).(fieldNames{fieldNameCntr}) = tempResult(fileIdx(fileCntr)).result.(fieldNames{fieldNameCntr}); %#ok
-                    end
-                end
-
-
-                %decide how tasks should be collated
-                if isempty(p.Results.mFile) %the user didn't specify, so the result will be a struct array (result(1:nrInArray).result....)
-                    result = preResult;
-                else        %the user did specify a function that was translated in to a string of numbers in taskBatch, so now we'll translate it back
-                    collateFun = str2num(p.Results.mFile);  %#ok           %str2double doesn't work
-                    collateFun = getArrayFromByteStream(uint8(collateFun));
-
-                    if contains(collateFun,'@')  %apparently we are dealing with a string that should be translated to a fucntion(-handle) again
-                        collateFun = str2func(collateFun);
-                    end
-
-                    result = feval(collateFun,preResult);
-
-                end
-
-            catch theCulprit
-                result = theCulprit;
-            end
-        end
-
-
         function fileInFileOutRun(jobID,taskNr,varargin) %#ok<INUSL>
             % This function runs on the cluster in response to a call to mslurm.fileInFileOut on the client.
             % It is not meant to be called directly. call
@@ -2559,22 +1827,27 @@ classdef mslurm < handle
                 mslurm.setpref(p,value)
             end
         end
-    
 
-    %% Set the status bar text of the Matlab desktop (from undocumented matlab)
-    function status(msg,varargin)
-        statusText = sprintf(msg,varargin{:});
-        desktop = com.mathworks.mde.desk.MLDesktop.getInstance;     %#ok<JAPIMATHWORKS>
-        if desktop.hasMainFrame
-            % Schedule a timer to update the status text
-            % Note: can't update immediately (will be overridden by Matlab's 'busy' message)
-            timerFcn = @(~,~)(desktop.setStatusText(statusText));
-            t = timer('TimerFcn',timerFcn, 'StartDelay',0.05, 'ExecutionMode','singleShot');
-            start(t);
-        else
-            disp(statusText);
+
+        %% Set the status bar text of the Matlab desktop (from undocumented matlab)
+        function status(msg,varargin)
+            statusText = sprintf(msg,varargin{:});
+            desktop = com.mathworks.mde.desk.MLDesktop.getInstance;     %#ok<JAPIMATHWORKS>
+            if desktop.hasMainFrame
+                % Schedule a timer to update the status text
+                % Note: can't update immediately (will be overridden by Matlab's 'busy' message)
+                timerFcn = @(~,~)(desktop.setStatusText(statusText));
+                t = timer('TimerFcn',timerFcn, 'StartDelay',0.05, 'ExecutionMode','singleShot');
+                start(t);
+            else
+                disp(statusText);
+            end
         end
-    end
+
+        function v = unixfile(varargin)
+            v = fullfile(varargin{:});
+            v = strrep(v,filesep,'/');
+        end
     end
 end
 
