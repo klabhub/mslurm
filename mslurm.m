@@ -22,42 +22,42 @@
 classdef mslurm < handle
 
     properties (Constant)
-        PREFGRP = "mSlurm"  % Group that stores string preferences for slurm
-        PREFS   = ["user","keyfile","host","remoteStorage","localStorage", "matlabRoot","nodeTempDir","headRootDir","mslurmFolder"];
-        SBATCHFILE = 'mslurmSBatch.sh';
-        STDOUTFILE = 'stdout';
-        STDERRFILE = 'stderr';
+        PREFGRP     string = "mSlurm"  % Group that stores string preferences for slurm
+        PREFS       string = ["user","keyfile","host","remoteStorage","localStorage", "matlabRoot","nodeTempDir","headRootDir","mslurmFolder"];
+        SBATCHFILE  string = "mslurmSBatch.sh";
+        STDOUTFILE  string = "stdout";
+        STDERRFILE  string = "stderr";
     end
 
     properties (SetAccess=public, GetAccess=public)
         %% Installation defaults (read from preferences at construction)
-        remoteStorage       = ''; % Location on HPC Cluster where scripts and logs will be written
-        localStorage        = ''; % Location on client where logs and scripts will be written
-        host                = ''; % Host Address
-        user                = ''; % Remote user name
-        keyfile             = ''; % Name of the SSH key file. (full name)
-        matlabRoot          = ''; % Matlab root on the cluster.
-        mslurmFolder        = ''; % Folder where this mslurm toolbox is installed on the cluster.
+        remoteStorage       string  = ""; % Location on HPC Cluster where scripts and logs will be written
+        localStorage        string  = ""; % Location on client where logs and scripts will be written
+        host                string  = ""; % Host Address
+        user                string  = ""; % Remote user name
+        keyfile             string  = ""; % Name of the SSH key file. (full name)
+        matlabRoot          string  = ""; % Matlab root on the cluster.
+        mslurmFolder        string  = ""; % Folder where this mslurm toolbox is installed on the cluster.
 
         %% Session defaults (can be overruled when submitting specific jobs).
-        nodeTempDir         = '';  % The path to a directory on a node that can be used to save data temporarily (e.g. /scratch/)
-        headRootDir         = '';  % The path to the directory on the head node where results can be copied
-        startupDirectory    = '';  % The directory where matlab will start (-sd command line argument)
-        workingDirectory    = ''; % The directory where the code will execute (if unspecified, defaults to remoteStorage location)
+        nodeTempDir         string  = "";  % The path to a directory on a node that can be used to save data temporarily (e.g. /scratch/)
+        headRootDir         string  = "";  % The path to the directory on the head node where results can be copied
+        startupDirectory    string  = "";  % The directory where matlab will start (-sd command line argument)
+        workingDirectory    string  = ""; % The directory where the code will execute (if unspecified, defaults to remoteStorage location)
         addPath             = {}; % Cell array of folders that shoudl be added to the path.
         batchOptions        = {}; % Options passed to sbatch (parm,value pairs)
-        runOptions          = ''; % Options passed to srun
+        runOptions          string  = ""; % Options passed to srun
         env                 = ""; % A string array of environment variable names that will be read from the client environemtn and passed to the cluster. To set a cluster environment variable to a specific value,some of these elements can be "VAR=VALUE"
 
     end
 
     properties (Dependent,SetAccess=protected)
-        pwd;                    % Working directory on the SLURM cluster
-        nrJobs;                 % Number of jobs currently available in the log (i.e. submitted between .from and .to)
-        isConnected;            % Check that we have an open SSH connection to the cluster.
+        pwd         string ;    % Working directory on the SLURM cluster
+        nrJobs      double ;    % Number of jobs currently available in the log (i.e. submitted between .from and .to)
+        isConnected logical;    % Check that we have an open SSH connection to the cluster.
         failState;              % Current state of each of the jobs in the log.
         failStateName;
-        uid;                    % A unique ID.
+        uid         string;     % A unique ID.
     end
     properties (SetAccess=protected, GetAccess=public)
         jobs;                    % A structure with the information retrieved from the slurm accounting logs (see the sacct function below)
@@ -131,7 +131,7 @@ classdef mslurm < handle
 
         function v = get.uid(o)
             % A unique id for a job
-            v = char(datetime("now",'Format','yy.MM.dd_HH.mm.SS.sss'));
+            v = string(datetime("now",'Format','yy.MM.dd_HH.mm.SS.sss'));
         end
     end
 
@@ -140,20 +140,23 @@ classdef mslurm < handle
         function [local,remote,jobName]= setupJob(o,prefix)
             arguments
                 o (1,1) mslurm
-                prefix (1,1) string
+                prefix (1,:) string
             end
+        
             id= o.uid;
-            jobName = [prefix '-' id];
+            jobName = prefix  + "-" +  id;
+            mslurm.log('Preparing %s. ',jobName);
+
             local = fullfile(o.localStorage,jobName);
 
-            if ~exist(local,'dir')
+            if ~exist(local,"DIR")
                 [success,message] = mkdir(local);
             end
 
             assert(success,'Failed to create local folder %s (%s)',local,message);
-            remote = unixfile(o.remoteStorage,jobName);
-            if ~o.exist(remote,'dir')
-                o.command(['mkdir ' remote]);
+            remote = mslurm.unixfile(o.remoteStorage,jobName);
+            if ~o.exist(remote,"DIR")
+                o.command("mkdir " +  remote);
             end
         end
 
@@ -183,21 +186,21 @@ classdef mslurm < handle
             end
             ssh2Install = fileparts(which('ssh2'));
             jarName = strrep(fullfile(ssh2Install,'ganymed-ssh2-build250','ganymed-ssh2-build250.jar'),'\','/');
-            if ~exist(jarName,'file')
+            if ~exist(jarName,"FILE")
                 error('Could not load the SSH2 java file. Please check your matlab-ssh2 installation.')
             end
             javaaddpath(jarName);
             % Setup the object with saved prefs, overruled by session specific
             % input arguments to the constructor
-            o.host= char(pv.host);
-            o.user = char(pv.user);
-            o.keyfile = char(pv.keyfile);
-            o.remoteStorage = char(pv.remoteStorage);
-            o.matlabRoot = char(pv.matlabRoot);
-            o.localStorage = char(pv.localStorage);
-            o.nodeTempDir  = char(pv.nodeTempDir);
-            o.headRootDir = char(pv.headRootDir);
-            o.mslurmFolder= char(pv.mslurmFolder);
+            o.host= pv.host;
+            o.user = pv.user;
+            o.keyfile = pv.keyfile;
+            o.remoteStorage = pv.remoteStorage;
+            o.matlabRoot = pv.matlabRoot;
+            o.localStorage = pv.localStorage;
+            o.nodeTempDir  = pv.nodeTempDir;
+            o.headRootDir = pv.headRootDir;
+            o.mslurmFolder= pv.mslurmFolder;
         end
 
 
@@ -215,11 +218,12 @@ classdef mslurm < handle
 
         function v = fairshare(o,usr)
             % Show the fairshare score of the uer (or any user)
-            % 1= good, 0= bad.
-            if nargin <2
-                usr = o.user;
+            % 1= good, 0= bad
+            arguments
+                 o (1,1) mslurm
+                 usr (1,1) string  =o.user
             end
-            v = o.command(['sshare --noheader --Users ' usr ' --format="FairShare"']);
+            v = o.command("sshare --noheader --Users " +  usr + " --format=''FairShare''");
             v= v{1}; % First line is user, second is 'general'?
             v = str2double(v);
         end
@@ -269,20 +273,27 @@ classdef mslurm < handle
 
         function [results,err] = command(o,cmd,varargin)
             % Execute an arbitrary UNIX command on the cluster.
-            if nargin>2
+            arguments 
+                o (1,1) mslurm
+                cmd (1,1) string
+            end
+            arguments (Repeating)
+                varargin 
+            end
+            if ~isempty(varargin)
                 cmd = sprintf(cmd,varargin{:});
             end
             if ~isempty(o.ssh)
                 USESSHERR = nargout('ssh2_command')==3; % If you have the klab SSH fork it returns err messages for debugging. Otherwise keep this as false.
                 try
                     if USESSHERR
-                        [o.ssh,results,err] = ssh2_command(o.ssh,cmd);
+                        [o.ssh,results,err] = ssh2_command(o.ssh,char(cmd));
                         if ~isempty(err{1})
                             fprintf('The %s command generated the following errors:\n %s',cmd,strjoin(err,'\n'));
                         end
                     else
                         err= {'unknonwn error'};
-                        [o.ssh,results] = ssh2_command(o.ssh,cmd);
+                        [o.ssh,results] = ssh2_command(o.ssh,char(cmd));
                     end
                 catch me
                     if any(ismember({me.stack.name},'mslurm.connect'))
@@ -292,7 +303,7 @@ classdef mslurm < handle
                         % Try to reconnect once.
                         mslurm.log('SSH error. Trying to reconnect');
                         connect(o);
-                        [o.ssh,results] = ssh2_command(o.ssh,cmd);
+                        [o.ssh,results] = ssh2_command(o.ssh,char(cmd));
                         mslurm.log('Reconnected.')
                     end
                 end
@@ -306,18 +317,18 @@ classdef mslurm < handle
 
         function yesno = exist(o,file,mode)
             % Check whether a file or directory exists on the cluster.
-            if nargin<3
-                mode ='file';
-            end
-            switch upper(mode)
-                case 'FILE'
+            arguments 
+                o (1,1) mslurm
+                file (1,1) string 
+                mode (1,1) string {mustBeMember(mode,["FILE" "DIR"])} = "FILE"
+            end 
+            switch mode
+                case "FILE"
                     op= 'e';
-                case 'DIR'
+                case "DIR"
                     op = 'd';
-                otherwise
-                    error(['Unknown mode ' mode ]);
             end
-            result = o.command([ '[ -' op ' '  file ' ] && echo "yes"']);
+            result = o.command("[ -%s %s ] && echo ''yes''", op , file );
             yesno = strcmpi(result,'yes');
         end
 
@@ -326,77 +337,78 @@ classdef mslurm < handle
             % The remote directory is created if it does not already exist.
             % filename = The full path to the file to be copied
             % remoteDir = the name of the remote directory [o.remoteStorage]
-
-            if ~exist(filename,'file')
-                error('Local file %s not found. Cannot copy to cluster.',filename)
+            arguments
+               o (1,1) mslurm
+               filename (1,1) string
+               remoteDir (1,1) string
             end
+            if ~exist(filename,"FILE")
+                error('Local file %s not found. Cannot copy to cluster.',filename)
+           end
             [localPath,filename,ext] = fileparts(filename);
-            filename = [filename ext];
+            filename = filename + ext;
             if nargin<3
                 remoteDir = o.remoteStorage;
             end
-            if ~o.exist(remoteDir,'dir')
-                result = o.command(['mkdir ' remoteDir]);
+            if ~o.exist(remoteDir,"DIR")
+                result = o.command('mkdir ' + remoteDir);
             end
             try
-                o.ssh = scp_put(o.ssh,filename,remoteDir,localPath,filename);
+                o.ssh = scp_put(o.ssh,char(filename),char(remoteDir),char(localPath),char(filename));
             catch
                 mslurm.log('SSH error. Trying to reconnect');
                 connect(o);
-                o.ssh = scp_put(o.ssh,filename,remoteDir,localPath,filename);
+                o.ssh = scp_put(o.ssh,char(filename),char(remoteDir),char(localPath),char(filename));
             end
         end
 
         function get(o,files,localJobDir,remoteJobDir,deleteRemote)
+            arguments 
+                o (1,1) mslurm
+                files 
+                localJobDir (1,1) string = o.localStorage
+                remoteJobDir (1,1) string = o.remoteStorage
+                deleteRemote (1,1) logical = false
+            end 
             if ischar(files)
                 files= {files};
             end
-            if nargin<5
-                deleteRemote = false;
-                if nargin < 4
-                    remoteJobDir = o.remoteStorage;
-                    if nargn <3
-                        localJobDir = o.localStorage;
-                    end
-                end
-            end
             mslurm.log('Starting data transfer...')
             try
-                o.ssh = scp_get(o.ssh,files,localJobDir,remoteJobDir);
+                o.ssh = scp_get(o.ssh,files,char(localJobDir),char(remoteJobDir));
             catch
                 mslurm.log('SSH error. Trying to reconnect');
                 connect(o)
-                o.ssh = scp_get(o.ssh,files,localJobDir,remoteJobDir);
+                o.ssh = scp_get(o.ssh,files,char(localJobDir),char(remoteJobDir));
             end
             mslurm.log('Data transfer done.')
 
             %% cleanup if requested
             if deleteRemote
                 mslurm.log('Deleting remote files')
-                o.command(['cd ' remoteJobDir ]);
+                o.command('cd ' + remoteJobDir );
                 for i=1:numel(files)
-                    o.command([' rm ' files{i} ]);
+                    o.command('rm  %s', files{i});
                 end
             end
-
         end
 
         function connect(o)
             % Connect to the remote HPC cluster
-            if ~exist(o.keyfile,'file')
-                error(['The specified SSH key file does not exist: ' o.keyfile]);
+            if ~exist(o.keyfile,"FILE")
+                error('The specified SSH key file does not exist: %s ', o.keyfile);
             end
-            o.ssh = ssh2_config_publickey(o.host,o.user,o.keyfile,' ');
+            o.ssh = ssh2_config_publickey(char(o.host),char(o.user),char(o.keyfile),' ');
             o.ssh.command_ignore_stderr = false;
 
-            if ~o.exist(o.remoteStorage,'dir')
-                result = o.command(['mkdir '  o.remoteStorage]); %#ok<NASGU>
+            if ~o.exist(o.remoteStorage,"DIR")
+                result = o.command("mkdir %s",  o.remoteStorage); %#ok<NASGU>
             end
-            if ~exist(o.localStorage,'dir')
+            if ~exist(o.localStorage,"DIR")
                 mkdir(o.localStorage);
             end
             %o.ssh.autoreconnect = true; % Seems to make connection slower?
-            result = o.command('scontrol show config | sed -n ''/^MaxArraySize/s/.*= *//p''');
+            result = o.command("scontrol show config | sed -n ''/^MaxArraySize/s/.*= *//p''");
             o.maxArraySize = str2double(result{1});
         end
 
@@ -412,22 +424,22 @@ classdef mslurm < handle
             % OUTPUT
             %  T = table with the smap info
             % msg = warning message
-
-            if nargin <2
-                options ='';
-            end
-            id = char(datetime("now",'Format','sss'));
-            filename = ['smap.output.' id '.txt'];
-            msg = o.command([' smap ' options ' -c > ' o.remoteStorage '/' filename]);
+            arguments 
+                o (1,1) mslurm
+                options (1,1) string = ""
+            end 
+            id = string(datetime("now",'Format','sss'));
+            filename = "smap.output." +  id + ".txt";
+            msg = o.command(" smap %s -c > %s/%s",options, o.remoteStorage,filename);
             try
-                o.ssh = scp_get(o.ssh,filename,o.localStorage,o.remoteStorage);
-                o.command(['rm ' o.remoteStorage '/' filename]);
+                o.ssh = scp_get(o.ssh,char(filename),char(o.localStorage),char(o.remoteStorage));
+                o.command("rm %s/%s",o.remoteStorage ,filename);
             catch
-                msg = 'Failed to perform an smap';
+                msg = {"Failed to perform an smap"};
             end
             localFile = fullfile(o.localStorage,filename);
             if nargout ==0
-                mslurm.log(msg);
+                mslurm.log(msg{1});
                 edit(localFile);
             else
                 T = readtable(localFile);
@@ -435,7 +447,7 @@ classdef mslurm < handle
             delete(localFile);
         end
 
-        function results = retrieve(o,tag,varargin)
+        function results = retrieve(o,tag,pv)
             % Retrieve the results generated by feval or batch from the cluster
             % The output argument is a cell array with the output of
             % the users' mfile. Jobs that failed will have an empty element
@@ -456,14 +468,16 @@ classdef mslurm < handle
             % function). [true]
             % 'checkSacct' - Check the accounting log on SLURM to get
             % information on completed/failed jobs.
-            p=inputParser;
-            p.addParameter('partial',true); % Allow partial result retrieval.
-            p.addParameter('deleteRemote',true); % Remove the results from the cluster (after copying)
-            p.addParameter('deleteLocal',true); % Remove the results from the local disk storage (after returning to the caller).
-            p.addParameter('checkSacct',true);
-            p.parse(varargin{:});
+            arguments 
+                o (1,1) mslurm
+                tag (1,1) string
+                pv.partial (1,1) logical = true
+                pv.deleteRemote (1,1) logical = true
+                pv.deleteLocal (1,1) logical = true
+                pv.checkSacct (1,1) logical = true
+            end
             results ={};
-            if p.Results.checkSacct
+            if pv.checkSacct
                 o.sacct; % Update accounting
                 state = o.failState; %0 = success, -1 = success after failing, -2 = running, >0= number of attempts.
                 thisJob = strcmpi(tag,{o.jobs.JobName});
@@ -472,36 +486,34 @@ classdef mslurm < handle
                 nrSuccess  =sum(ismember(state(thisJob),[0 -1]));
 
                 if nrFailed >0
-                    mslurm.log([num2str(nrFailed) ' jobs failed']);
+                    mslurm.log("%d jobs failed",nrFailed);
                 end
 
                 if nrRunning >0
-                    mslurm.log([num2str(nrRunning) ' jobs still running']);
+                    mslurm.log("%d jobs still running", nrRunning);
                 end
                 if nrSuccess >0
-                    mslurm.log ([num2str(nrSuccess) ' jobs completed sucessfully']);
+                    mslurm.log ("%d jobs completed sucessfully",nrSuccess);
                 end
 
-                if ~p.Results.partial && nrRunning >0
-                    mslurm.log([num2str(nrRunning) ' jobs are still running. Let''s wait a bit...']);
+                if ~pv.partial && nrRunning >0
+                    mslurm.log("%d jobs are still running. Let''s wait a bit...", nrRunning);
                     return
                 end
             end
 
             %% Check what;s available remotely and transfer.
-            remoteJobDir = strrep(fullfile(o.remoteStorage,tag),'\','/');
-            files = o.command(['cd ' remoteJobDir '; ls *.result.mat']);
+            remoteJobDir = mslurm.unixfile(o.remoteStorage,tag);
+            files = o.command("cd %s; ls *.result.mat",remoteJobDir);
             if ~isempty(files{1})
                 localJobDir  = fullfile(o.localStorage,tag);
-                if ~exist(localJobDir,'dir')
+                if ~exist(localJobDir,"DIR")
                     [success,message] = mkdir(localJobDir);
-                    if ~success
-                        error(['Failed to create local directory to store the results: ' message]);
-                    end
+                    assert(success,"Failed to create local directory to store the results (%s)", message);                    
                 end
                 get(o,files,localJobDir,remoteJobDir);
             else
-                mslurm.log(['No files in job directory: ' remoteJobDir]);
+                mslurm.log("No files in job directory %s",remoteJobDir);
                 return;
             end
 
@@ -519,15 +531,15 @@ classdef mslurm < handle
             end
 
             %% cleanup if requested
-            if p.Results.deleteRemote
+            if pv.deleteRemote
                 for i=1:numel(files)
-                    o.command(['cd ' remoteJobDir '; rm ' files{i} ]);
+                    o.command("cd %s; rm %s",remoteJobDir,files{i});
                 end
             end
-            if p.Results.deleteLocal
+            if pv.deleteLocal
                 [success,message]= rmdir(localJobDir,'s');
                 if ~success
-                    mslurm.log(['Could not delete the local job directory: ' localJobDir ' (' message ')']);
+                    mslurm.log("Could not delete the local job directoryv %s (%s)", localJobDir ,message );
                 end
             end
         end
@@ -719,16 +731,14 @@ classdef mslurm < handle
             end
 
             [local,remote,jobName]= setupJob(o,fun);
-
-            mslurm.log('Preparing %s. ',jobName);
-
+       
             %% Find the unmatched and save as input arg.
             if ~isempty(fieldnames(p.Unmatched))
                 args = p.Unmatched;
                 argsFile = [jobName '_args.mat'];
                 % Save a local copy of the args
                 localArgsFile = fullfile(local,argsFile);
-                remoteArgsFile = unixfile(remote,argsFile);
+                remoteArgsFile = mslurm.unixfile(remote,argsFile);
                 save(localArgsFile,'args');
                 % Copy the args file to the cluster
                 o.put(localArgsFile,remote);
@@ -859,7 +869,7 @@ classdef mslurm < handle
             save(localDataFile,'data','-v7.3'); % 7.3 needed to allow partial loading of the data in each worker.
             % Copy the data file to the cluster
             o.put(localDataFile,remote);
-            remoteDataFile= unixfile(remote,'input.mat');
+            remoteDataFile= mslurm.unixfile(remote,'input.mat');
 
             p=inputParser;
             p.addParameter('batchOptions',o.batchOptions);
@@ -881,7 +891,7 @@ classdef mslurm < handle
                 argsFile = 'args.mat';
                 % Save a local copy of the args
                 localArgsFile = fullfile(local,argsFile);
-                remoteArgsFile = unixfile(remote,argsFile);
+                remoteArgsFile = mslurm.unixfile(remote,argsFile);
                 save(localArgsFile,'args');
                 % Copy the args file to the cluster
                 o.put(localArgsFile,remote);
@@ -896,7 +906,7 @@ classdef mslurm < handle
             end
 
             %% Start the jobs
-            opts.jobName = jobName;
+            
             opts.batchOptions = p.Results.batchOptions;
             opts.mfile ='mslurm.fevalRun';
             opts.mfileExtraInput ={'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',remote};
@@ -906,7 +916,8 @@ classdef mslurm < handle
             opts.startupDirectory = p.Results.startupDirectory;
             opts.addPath = addPth;
             opts.taskNr =1;
-            o.sbatch(opts);
+            opts  = namedargs2cell(opts);
+            o.sbatch(jobName,local,remote,opts{:});
 
         end
 
@@ -989,26 +1000,26 @@ classdef mslurm < handle
 
             if pv.mfile ~=""
                 % Wrap an mfile
-                extraIn = '';
+                extraIn = "";
                 for i=1:2:length(pv.mfileExtraInput)
                     if ischar(pv.mfileExtraInput{i+1}) || isstring(pv.mfileExtraInput{i+1})
-                        strValue = ['''' pv.mfileExtraInput{i+1} ''''];
+                        strValue = "'" + pv.mfileExtraInput{i+1} + "'";
                     elseif isnumeric(pv.mfileExtraInput{i+1})
-                        strValue = ['[' num2str(pv.mfileExtraInput{i+1}) ']'];
+                        strValue = "[" + num2str(pv.mfileExtraInput{i+1}) + "]";
                     else
                         error('Extra input to the mfile must be parm/value pairs. Value can only be numeric or string');
                     end
-                    extraIn = cat(2,extraIn,',''', pv.mfileExtraInput{i},''',',strValue);
+                    extraIn = extraIn + sprintf(",'%s',%s",pv.mfileExtraInput{i} ,strValue);
                 end
 
                 if pv.startupDirectory==""
-                    sd = '';
+                    sd = "";
                 else
-                    sd = ['-sd '  pv.startupDirectory];
+                    sd = "-sd " +   pv.startupDirectory;
                 end
 
                 addPth =pv.addPath + ":" + o.mslurmFolder;
-                addPathStr = sprintf('addpath(''%s'')',addPth);
+                addPathStr = sprintf("addpath('%s')",addPth);
 
                 if pv.workingDirectory ==""
                     % Run in remoteStorage directoryc
@@ -1018,10 +1029,10 @@ classdef mslurm < handle
                     wd = pv.workingDirectory;
                 end
                 if pv.nrInArray>=1
-                    runStr = ['%s/matlab  ' sd ' -nodisplay -nodesktop -r  "try;%s;cd ''%s'';%s($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID %s);catch me;mslurm.exit(me);end;mslurm.exit(0);"'];
+                    runStr = "%s/matlab "  + sd  + " -nodisplay -nodesktop -r ""try;%s;cd '%s';%s($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID %s);catch me;mslurm.exit(me);end;mslurm.exit(0);""";
                     run = sprintf(runStr,o.matlabRoot,addPathStr,wd,pv.mfile,extraIn);
                 else
-                    runStr = ['%s/matlab ' sd ' -nodisplay -nodesktop -r "try;%s;cd ''%s''; %s($SLURM_JOB_ID,%d %s);catch me;mslurm.exit(me);end;mslurm.exit(0);"'];
+                    runStr = "%s/matlab " +  sd  + " -nodisplay -nodesktop -r ""try;%s;cd '%s'; %s($SLURM_JOB_ID,%d %s);catch me;mslurm.exit(me);end;mslurm.exit(0);""";
                     run = sprintf(runStr,o.matlabRoot,addPathStr,wd,pv.mfile,pv.taskNr,extraIn);
                 end
             elseif pv.command ~=""
@@ -1036,13 +1047,15 @@ classdef mslurm < handle
                 % Ensure that array job numbers generated by slurm are
                 % base-1 (default is base zero)
                 batchOpts = cat(2,pv.batchOptions,{'array',['1-' num2str(pv.nrInArray)]});
-                outFile = [mslurm.STDOUTFILE '_%a.out'];
+                outFile = mslurm.STDOUTFILE + "_%a.out";
             else
                 batchOpts = pv.batchOptions;
                 outFile = mslurm.STDOUTFILE;
             end
             % Options with empty values are removed.
             empty = find(cellfun(@isempty,batchOpts(2:2:end)));
+            batchOpts([2*empty-1 2*empty])= [];
+            empty = find(cellfun(@(x) (isstring(x) && x==""),batchOpts(2:2:end)));
             batchOpts([2*empty-1 2*empty])= [];
 
             batchFile = mslurm.SBATCHFILE;
@@ -1054,8 +1067,8 @@ classdef mslurm < handle
                     fprintf(fid,'#SBATCH --%s\n',batchOpts{opt});
                 elseif isnumeric(batchOpts{opt+1})
                     fprintf(fid,'#SBATCH --%s=%d\n',batchOpts{opt},batchOpts{opt+1});
-                elseif ischar(batchOpts{opt+1})
-                    isSpace  = batchOpts{opt+1}==' ';
+                elseif ischar(batchOpts{opt+1}) || isstring(batchOpts{opt+1})
+                    isSpace  = strcmpi(batchOpts{opt+1},' ');
                     if any(isSpace)
                         batchOpts{opt+1}(isSpace) = '';
                         mslurm.log(['Removing spaces from Slurm Batch Option ''' batchOpts{opt} ''' now set to:''' batchOpts{opt+1} '''']);
@@ -1090,13 +1103,12 @@ classdef mslurm < handle
                 % Start the sbatch
                 [result,err] = o.command(sprintf('cd %s ;sbatch %s/%s',remote,remote,batchFile));
                 jobId = str2double(regexp(result{1},'\d+','match'));
-                if iscell(err)
-                    err = err{1};
-                end
                 if isempty(jobId) || isnan(jobId)
-                    mslurm.log(['Failed to submit ' jobName ' (Msg=' result{1} ', Err: ' err{1} ' )']);
+                    mslurm.log("Failed to submit %s ",jobName)
+                    result{1}
+                    err{1}
                 else
-                    mslurm.log(['Successfully submitted ' jobName ' (JobID=' num2str(jobId) ')']);
+                    mslurm.log("Successfully submitted %s (JobID= %d)",jobName, jobId );
                 end
             end
         end
@@ -1247,15 +1259,18 @@ classdef mslurm < handle
                 if ~isempty(arrayElement)
                     arrayElement = ['_' arrayElement]; %#ok<AGROW>
                 end
-                remoteFile= unixfile(o.remoteStorage,o.jobs(ix(i)).JobName,[filename arrayElement '.out']);
+                remoteFile= mslurm.unixfile(o.remoteStorage,o.jobs(ix(i)).JobName,filename + arrayElement + ".out");
                 localDir =fullfile(o.localStorage,o.jobs(ix(i)).JobName);
-                localFile{i} =fullfile(localDir,filename);
-                if ~exist(localFile{i},'file') || p.Results.forceRemote
-                    if o.exist(remoteFile,'file')
-                        [pth,f,e] = fileparts(remoteFile);
-                        o.ssh = scp_get(o.ssh,[f e],localDir,pth);
+                if ~exist(localDir,"DIR")
+                    mkdir(localDir)
+                end
+                [pth,f,e] = fileparts(remoteFile);
+                localFile{i} =fullfile(localDir,f+e);
+                if ~exist(localFile{i},"FILE") || p.Results.forceRemote
+                    if o.exist(remoteFile,"FILE")
+                        o.ssh = scp_get(o.ssh,char(f + e),char(localDir),char(pth));
                     else
-                        msg{i} = ['File does not exist: ' remoteFile];
+                        msg{i} = "File does not exist: " +  remoteFile;
                         if nargout <2
                             mslurm.log(msg{i});
                         end
@@ -1458,7 +1473,7 @@ classdef mslurm < handle
                 file = '';
                 line = 0;
             end
-            fprintf([msg '\t\t (<a href="matlab:matlab.desktop.editor.openAndGoToLine\t(''%s'',%d);">%s@line %d</a>)\n' ],varargin{:},file,line,fun,line);
+            fprintf(msg + "\t\t (<a href=""matlab:matlab.desktop.editor.openAndGoToLine\t(''%s'',%d);'"">%s@line %d</a>)\n" ,varargin{:},file,line,fun,line);
         end
 
         function T = slurmTime(t)
@@ -1627,11 +1642,11 @@ classdef mslurm < handle
             outFile = dataMatFile.outFile(taskNr,1);
             filename = fullfile(inPath{1},inFile{1});
 
-            if ~exist(filename,'file')
+            if ~exist(filename,"FILE")
                 error(['File : ' filename ' does not exist']);
             end
 
-            if ~exist(outPath,'dir')
+            if ~exist(outPath,"DIR")
                 [success,message] = mkdir(outPath);
                 if ~success
                     error(['Failed to create output directory: ' outPath{1} '(' message ')']);

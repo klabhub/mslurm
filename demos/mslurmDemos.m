@@ -18,7 +18,7 @@ nrWorkers = 5;
 data = 10*ones(nrWorkers,1);
 options = {'time',10}; % Ask for 10 minutes of wall time.
 randTag = cls.feval('rand',data,'batchOptions',options); % This will call rand(data(1)) in one matlab sesssion, rand(data(2)) in another etc.
-% Click refresh in the mslurmApp to see these jobs
+% Click refresh in the mslurmApp to see these jobs, or use cls.sacct
 % Once they have completed, you can retrieve the results with 
 results = cls.retrieve(randTag);
 
@@ -32,7 +32,7 @@ rtTag = cls.feval('analyzeRt',data,'copy',true);
 % time. Because that function won't be available on the cluster, we set
 % 'copy' to true. 
 %
-% Once the jobs complete, retrieve the data. Each item int he cell array
+% Once the jobs complete, retrieve the data. Each item in the cell array
 % correponds to the output of a single job (a subject here).
 meanRt = cls.retrieve(rtTag);
 
