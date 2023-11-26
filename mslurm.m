@@ -1178,7 +1178,7 @@ classdef mslurm < handle
     %% Static helper function
     methods (Static)
         function log(msg,varargin)
-            Writes a message to the command line and adds a clickable link to the relevant line in the m file that generated the message.
+            %Writes a message to the command line and adds a clickable link to the relevant line in the m file that generated the message.
             [st] = dbstack('-completenames');
             if length(st)>1
                 fun = st(2).name;
