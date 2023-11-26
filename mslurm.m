@@ -508,105 +508,9 @@ classdef mslurm < handle
                 end
             end
         end
-        function remote = fileInFileOut(o,fun,varargin)
-            % This function takes a list of files, generates one job per
-            % file to process the file and then saves the results in an
-            % output file.
-            %
-            % The first input argument 'fun' should be a function that takes a filename
-            % (complete with path) as its first input, and returns a single
-            % ouput. This single output will be saved to the output file.
-            % Additional inputs to 'fun' can be specified as parameter/value
-            % pairs.
-            %
-            % Input args: (parm/value pairs).
-            % 'inFile' -  a cell array of file names to process
-            % 'inPath'  -  a single path (that exists on the server)
-            % 'outTag' - This tag will be appended to the output filename
-            % 'outPath' - a single path to which the restuls will be
-            %               written. If empty, the default location for the
-            %               job will be used and the path returned as
-            %               outPath
-            %
-            % Slurm options can be specified as
-            % 'batchOptions'   -see mslurm.sbatch
-            % 'runOptions' - see mslurm.sbatch
-            %
-            % If the 'fun' is self-contained you can copy it to the server
-            % with 'copy' set to true.
-            %
-            % EXAMPLE
-            % o.fileInFileOut('preprocess','inFile',["f1.mat","f2.mat","f3.mat"],'inPath',"/work/data/",'outPath',"/work/results/",'outTag',".preprocessed",'mode',1)
-            % Will start jobs that calls the preprocess function like this
-            % (for each fo the f1..f3)
-            % results = preprocess('/work/data/f1.mat','mode',1);
-            % (Note how the 'mode' argument is passed to the user
-            % defined preprocess function: all parm/value pairs that are
-            % not recognized by the fileInFileOut function are passed that
-            % way).
-            % After completing the job, the results will be saved in
-            % /work/results/f1.preprocessed.mat
-            %
-            % The user is responsible for making sure that the f1.mat etc.
-            % exust in 'inPath' on the server, and for retrieving the
-            % results from the 'outPath'. (Presumably using something like
-            % rsync, otuside Matlab.)
-            pv=inputParser;
-            pv.addParameter('inFile',"",@isstring);
-            pv.addParameter('inPath',"",@isstring);
-            pv.addParameter('outTag','.processed',@isstring);
-            pv.addParameter('outPath',"",@isstring);
-            pv.addParameter('batchOptions',{});
-            pv.addParameter('runOptions',"",@isstring);
-            pv.addParameter('debug',false,@islogical);
-            pv.addParameter('copy',false,@islogical);
-            pv.KeepUnmatched = true;
-            pv.parse(varargin{:});
-
-            %% Prepare the list of files and paths
-            inFile= fullfile(pv.Results.inPath,pv.Results.inFile);
-            inPath = pv.Results.inPath;
-
-            % Out files are infile+tag
-            [~,f,e] =fileparts(pv.Results.inFile);
-            outFile =  f+pv.Results.outTag+ e;
-
-            [local,remote,jobName]= setupJob(o,fun);
-            if pv.Results.outPath ~=""
-                remote = pv.Results.outPath;
-            end
-
-            localDataFile = fullfile(local,jobName +"_data.mat");
-            remoteDataFile = fullfile(remote,jobName+ "_data.mat");
-            save(localDataFile,'inFile','outFile','inPath','-v7.3'); % 7.3 needed to allow partial loading of the data in each worker.
-            % Copy the data file to the cluster
-            o.put(localDataFile,remote);
 
 
-            if ~isempty(fieldnames(pv.Unmatched))
-                args = pv.Unmatched;
-                argsFile = jobName +"_args.mat";
-                % Save a local copy of the args
-                localArgsFile = fullfile(local,argsFile);
-                remoteArgsFile = fullfile(remote,argsFile);
-                save(localArgsFile,'args');
-                % Copy the args file to the cluster
-                o.put(localArgsFile,remote);
-            else
-                remoteArgsFile ="";
-            end
-
-            if pv.Results.copy
-                % Copy the mfile to remote storage.
-                mfilename = which(fun);
-                o.put(mfilename,remote);
-            end
-
-            %% Start the jobs
-            o.sbatch(jobName,local,remote, 'batchOptions',pv.Results.batchOptions,'mfile',"slurm.fileInFileOutRun",'mfileExtraInput',{'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',remote},'debug',pv.Results.debug,'runOptions',pv.Results.runOptions,'nrInArray',numel(inFile),'taskNr',1);
-        end
-
-        function jobName = batch(o,fun,varargin)
+        function jobName = remote(o,fun,pv)
             % Evaluate the mfile (fun) in each of the 'nrWorkers'
             %
             % The mfile can be a script or a function that takes
@@ -639,48 +543,46 @@ classdef mslurm < handle
             % funciton returns a unique 'tag' that can be passed to
             % mslurm.retrieve().
             %
-            p=inputParser;
-            p.addRequired('o');
-            p.addRequired('fun',@(x) ischar(x) || isstring(x));
-            p.addParameter('batchOptions',o.batchOptions,@iscell);
-            p.addParameter('runOptions',o.runOptions,@ischar);
-            p.addParameter('debug',false,@islogical);
-            p.addParameter('copy',false,@islogical);
-            p.addParameter('startupDirectory',o.startupDirectory,@ischar);
-            p.addParameter('workingDirectory',o.workingDirectory,@ischar);
-            p.addParameter('addPath',o.addPath,@(x) ischar(x) ||iscellstr(x) );
-            p.addParameter('nrWorkers',1);
-            p.addParameter('expressionName','expression');
-            p.KeepUnmatched = true;
-            p.parse(o,fun,varargin{:});
+            arguments
+                o (1,1) mslurm
+                fun (1,1)
+                pv.funData (:,:) =[]
+                pv.funParmValue (1,:) cell ={}
+                pv.batchOptions (1,:) cell = o.batchOptions
+                pv.runOptions (1,1) string = ""
+                pv.debug (1,1) logical  = false
+                pv.copy (1,1) logical  = false
+                pv.nrWorkers (1,1) double = 0
+                pv.expressionName (1,1) string ="expression"
+                pv.startupDirectory (1,1) string = o.startupDirectory;
+                pv.workingDirectory string = o.workingDirectory;
+                pv.addPath (:,:) string = o.addPath;
+                pv.env (1,1) string = o.env;
+                pv.nodeTempDir (1,1) string =  o.nodeTempDir;
 
-            if ischar(p.Results.addPath)
-                addPth = {p.Results.addPath};
-            else
-                addPth = p.Results.addPath;
             end
-            % Name the job after the current time. Assuming this will be
-            % unique.
+
 
             if contains(fun,{'(',';',','})
                 % This is an expression not an mfile. Create a temporary
-                mfilename =fullfile(tempdir,[p.Results.expressionName '.m']);
+                mfilename =fullfile(tempdir,pv.expressionName + ".m");
                 fid = fopen(mfilename,'w');
                 fprintf(fid,'%s\n',fun);
                 fclose(fid);
                 fun =p.Results.expressionName;
                 copy = true; % Have to copy
+                assert(isempty(pv.funData),'Passing data to an expression is not supported. Use a function for ''fun'' instead')
             else
                 mfilename = which(fun);
-                copy = p.Results.copy;
+                copy = pv.copy;
             end
 
             [local,remote,jobName]= setupJob(o,fun);
 
-            %% Find the unmatched and save as input arg.
-            if ~isempty(fieldnames(p.Unmatched))
-                args = p.Unmatched;
-                argsFile = [jobName '_args.mat'];
+            %% Save parm/value pairs that should be passed
+            if ~isempty(pv.funParmValue)
+                args = pv.funParmValue;
+                argsFile = jobName + "_args.mat";
                 % Save a local copy of the args
                 localArgsFile = fullfile(local,argsFile);
                 remoteArgsFile = mslurm.unixfile(remote,argsFile);
@@ -690,182 +592,57 @@ classdef mslurm < handle
             else
                 remoteArgsFile ='';
             end
+
+
+            if isempty(pv.funData)
+                remoteDataFile = "";
+                assert(pv.nrWorkers>0,"nrWorkers must be larger than zero (%d)" ,pv.nrWorkers)
+           
+            else
+                data =pv.funData;
+                if ischar(data)
+                    % Assume that a single string input means pass this string
+                    % to a single worker (and not pass each character to a
+                    % separate worker).
+                    data = {data};
+                end
+                if isrow(data)
+                    % This is interpreted as a column.
+                    data = data';
+                end
+                assert(pv.nrWorkers==0 || pv.nrWorkers==size(data,1),"Mismatch between the rows in funData (%d) and the nrWorkers (%d)",size(data,1),pv.nrWorkers)
+                pv.nrWorkers = size(data,1);
+                % Save a local copy of the input data
+                localDataFile = fullfile(local,'input.mat');
+                save(localDataFile,'data','-v7.3'); % 7.3 needed to allow partial loading of the data in each worker.
+                % Copy the data file to the cluster
+                o.put(localDataFile,remote);
+                remoteDataFile= mslurm.unixfile(remote,'input.mat');
+            end
+
 
             if copy
-                % Copy the mfile to remote storage.
+                % Copy the mfile to remote storage and add it to the remote
+                % path
                 o.put(mfilename,remote);
-                addToPath = cat(2,addPth,remote);
-            else
-                addToPath = addPth;
+                pv.addPath = [pv.addPath remote];
             end
 
             %% Start the jobs
-            opts.jobName = jobName;
-            opts.uniqueID = 'auto';
-            opts.batchOptions = p.Results.batchOptions;
-            opts.mfile ='mslurm.batchRun'; % This is the function that will interpret the input args and pass them to fun
-            opts.mfileExtraInput ={'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',remote};
-            opts.debug = p.Results.debug;
-            opts.runOptions= p.Results.runOptions;
-            opts.nrInArray = p.Results.nrWorkers;
-            opts.startupDirectory = p.Results.startupDirectory;
-            opts.addPath = addToPath;
-            opts.taskNr =1;
-            o.sbatch(opts);
-
-        end
-
-
-        function jobName = feval(o,fun,data,varargin)
-            % Evaluate the function fun on each of the rows of the
-            % array data.
-            %
-            % The mfile fun should be a function that takes each column of the
-            % the data array as an input, plus optionally any
-            % parameter/value pairs specified in the call to feval. (I.e.
-            % it could use the inputParser object, with StructExpand=true,
-            % to interpret all but its first input argument).
-            % 'data' must be a numeric, cell, or struct array.
-            %
-            % The following parm/value pairs control SLURM scheduling and
-            % are not passed to the function
-            % 'batchOptions' - passed to slurm the same way as in
-            %                   mslurm.sbatch
-            % 'runOptions'  = also passed to slurm. See mslurm.sbatch
-            %
-            %
-            % 'copy' set to true to copy the mfile (fun) to the server.
-            % Useful if the mfile you're executing is self-contained and
-            % does not yet exist on the server. Note that it will be copied
-            % to the .remoteStorage location, which is the working
-            % directory of the jobs.
-            %
-            % To retrieve the output each of the evaluations of fun, this
-            % funciton returns a unique 'tag' that can be passed to
-            % mslurm.retrieve().
-            %
-            %
-            % EXAMPLE
-            % data = 10x1 struct array with your data.
-            % analyzeMyData = a function that takes one element of the
-            % struct array as its input, and returns one output (any matlab
-            % variable).
-            %
-            % tag = o.feval('analyzeMyData',data);
-            % will copy the data struct to the server, then start 10 jobs,
-            % the first job/worker  will evaluate
-            % output1 = analyzeMyData(data(1));
-            % the second worker;
-            % output2 = analyzeMyData(data(2));
-            % etc,
-            % Once everything has completed (check mslurmApp you can get
-            % the results with
-            % results = o.retrieve(tag);
-            %  In tis example results{1} will contain output1, results{2}
-            %  will contain output2 etc.
-            %
-            % Here is a specific example where we use a numeric data input
-            % data = 1:10;
-            % i.e. worker 1 will get '1' as its input, worker 2 will get
-            % '2' etc,
-            % and the analysis that we do on this data is the function
-            % 'rand'.
-            % data = 1:10;
-            % tag = o.feval('rand',data) %
-            % % Wait a while...
-            % results  = retrieve(tag);
-            % results{1} will contain the result of rand(1);
-            % results{2} = rand(2);
-            % ...
-            % results{10} = rand(10);
-            %
-            %
-
-            if ~ischar(fun)
-                error('The fun argument must be the name of an m-file');
-            end
-            if ~(iscell(data) || isnumeric(data) || isstruct(data) || ischar(data))
-                error('Data must be numeric, cell, or struct');
-            end
-
-            %% Prepare job directories with data and args
-            if ischar(data)
-                % Assume that a single string input means pass this string
-                % to a single worker (and not pass each character to a
-                % separate worker).
-                data = {data};
-            end
-
-            if isrow(data)
-                % This is interpreted as a column.
-                data = data';
-            end
-
-            if isnumeric(data)
-                %Make the data into a cell.
-                data =num2cell(data);
-            end
-
-            nrDataJobs = size(data,1);
-            [local,remote,jobName]= setupJob(o,fun);
-
-            % Save a local copy of the input data
-            localDataFile = fullfile(local,'input.mat');
-            save(localDataFile,'data','-v7.3'); % 7.3 needed to allow partial loading of the data in each worker.
-            % Copy the data file to the cluster
-            o.put(localDataFile,remote);
-            remoteDataFile= mslurm.unixfile(remote,'input.mat');
-
-            p=inputParser;
-            p.addParameter('batchOptions',o.batchOptions);
-            p.addParameter('runOptions',o.runOptions);
-            p.addParameter('debug',false);
-            p.addParameter('copy',false);
-            p.addParameter('startupDirectory',o.startupDirectory);
-            p.addParameter('addPath',o.addPath,@(x) iscellstr(x) || ischar(x));
-            p.KeepUnmatched = true;
-            p.parse(varargin{:});
-            if ischar(p.Results.addPath)
-                addPth = {p.Results.addPath};
-            else
-                addPth = p.Results.addPath;
-            end
-
-            if ~isempty(fieldnames(p.Unmatched))
-                args = p.Unmatched;
-                argsFile = 'args.mat';
-                % Save a local copy of the args
-                localArgsFile = fullfile(local,argsFile);
-                remoteArgsFile = mslurm.unixfile(remote,argsFile);
-                save(localArgsFile,'args');
-                % Copy the args file to the cluster
-                o.put(localArgsFile,remote);
-            else
-                remoteArgsFile ='';
-            end
-
-            if p.Results.copy
-                % Copy the mfile to remote storage.
-                mfilename = which(fun);
-                o.put(mfilename,remote);
-            end
-
-            %% Start the jobs
-
-            opts.batchOptions = p.Results.batchOptions;
-            opts.mfile ='mslurm.fevalRun';
-            opts.mfileExtraInput ={'dataFile',remoteDataFile,'argsFile',remoteArgsFile,'mFile',fun,'nodeTempDir',o.nodeTempDir,'jobDir',remote};
-            opts.debug = p.Results.debug;
-            opts.runOptions= p.Results.runOptions;
-            opts.nrInArray = nrDataJobs;
-            opts.startupDirectory = p.Results.startupDirectory;
-            opts.addPath = addPth;
-            opts.taskNr =1;
-            opts  = namedargs2cell(opts);
+            opts.batchOptions = pv.batchOptions;
+            opts.mfile =fun;
+            opts.argsFile =remoteArgsFile;
+            opts.dataFile= remoteDataFile;
+            opts.nodeTempDir = pv.nodeTempDir;
+            opts.debug = pv.debug;
+            opts.runOptions= pv.runOptions;
+            opts.nrWorkers = pv.nrWorkers;
+            opts.startupDirectory = pv.startupDirectory;
+            opts.addPath = pv.addPath;
+            opts = namedargs2cell(opts);
             o.sbatch(jobName,local,remote,opts{:});
 
         end
-
 
 
         function [jobId,result] = sbatch(o,jobName,local,remote, pv)
@@ -888,7 +665,7 @@ classdef mslurm < handle
             %                   Cluster for options.
             %
             % runOptions  = options for the srun command in the batch file.
-            % nrInArray = This function can start Array Jobs on Slurm. This parm
+            % nrWorkers = This function can start Array Jobs on Slurm. This parm
             % specifies the number of matlab sessions that should be started
             % with the same mfile. If you use array jobs, your mfile will be called
             % with the array number as the second argument (and any extra
@@ -908,7 +685,7 @@ classdef mslurm < handle
             % result = Output of sbatch on the cluster
             %
             % EXAMPLE
-            % o.sbatch('jobName','sort','mfile','psort','mfileExtraInput','parmFile','nrInArray',10);
+            % o.sbatch('jobName','sort','mfile','psort','mfileExtraInput','parmFile','nrWorkers',10);
             %
             % This would start Matlab on 10 CPU's. In each Matlab session the psort.m mfile would be started as follows:
             % psort(JOBID, 1,'parmFile') (on the first CPU)
@@ -929,34 +706,24 @@ classdef mslurm < handle
                 remote (1,1) string
                 pv.batchOptions (1,:) cell = o.batchOptions
                 pv.runOptions (1,1) string = ""
-                pv.mfile (1,1) string = ""
-                pv.mfileExtraInput (1,:) cell = {}
+                pv.mFile (1,1) string = ""
+                pv.argsFile (1,1) string = ""
+                pv.dataFile (1,1) string = ""
                 pv.command (1,1) string = ""
-                pv.nrInArray (1,1) double = 0
+                pv.nrWorkers (1,1) double = 0
                 pv.debug (1,1) logical  = false
                 pv.taskNr (1,1) double  = 0
                 pv.startupDirectory (1,1) string = o.startupDirectory;
                 pv.workingDirectory string = o.workingDirectory;
                 pv.addPath (:,:) string = o.addPath;
                 pv.env (1,1) string = o.env;
+                pv.nodeTempDir (1,1) = o.nodeTempDir;
             end
 
 
 
-            if pv.mfile ~=""
-                % Wrap an mfile
-                extraIn = "";
-                for i=1:2:length(pv.mfileExtraInput)
-                    if ischar(pv.mfileExtraInput{i+1}) || isstring(pv.mfileExtraInput{i+1})
-                        strValue = "'" + pv.mfileExtraInput{i+1} + "'";
-                    elseif isnumeric(pv.mfileExtraInput{i+1})
-                        strValue = "[" + num2str(pv.mfileExtraInput{i+1}) + "]";
-                    else
-                        error('Extra input to the mfile must be parm/value pairs. Value can only be numeric or string');
-                    end
-                    extraIn = extraIn + sprintf(",'%s',%s",pv.mfileExtraInput{i} ,strValue);
-                end
-
+            if pv.mFile ~=""              
+                extraIn =sprintf(",'mFile',""%s"",'argsFile',""%s"",'dataFile',""%s"",'nodeTempDir',""%s"",'jobDir',""%s""",pv.mFile,pv.argsFile,pv.dataFile,pv.nodeTempDir,remote);
                 if pv.startupDirectory==""
                     sd = "";
                 else
@@ -973,12 +740,12 @@ classdef mslurm < handle
                     % Run in specified working Directory
                     wd = pv.workingDirectory;
                 end
-                if pv.nrInArray>=1
-                    runStr = "%s/matlab "  + sd  + " -nodisplay -nodesktop -r ""try;%s;cd '%s';%s($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID %s);catch me;mslurm.exit(me);end;mslurm.exit(0);""";
-                    run = sprintf(runStr,o.matlabRoot,addPathStr,wd,pv.mfile,extraIn);
+                if pv.nrWorkers>=1
+                    runStr = "%s/matlab "  + sd  + " -nodisplay -nodesktop -r ""try;%s;cd '%s';mslurm.remoteHandler($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID %s);catch me;mslurm.exit(me);end;mslurm.exit(0);""";
+                    run = sprintf(runStr,o.matlabRoot,addPathStr,wd,extraIn);
                 else
-                    runStr = "%s/matlab " +  sd  + " -nodisplay -nodesktop -r ""try;%s;cd '%s'; %s($SLURM_JOB_ID,%d %s);catch me;mslurm.exit(me);end;mslurm.exit(0);""";
-                    run = sprintf(runStr,o.matlabRoot,addPathStr,wd,pv.mfile,pv.taskNr,extraIn);
+                    runStr = "%s/matlab " +  sd  + " -nodisplay -nodesktop -r ""try;%s;cd '%s'; mslurm.remoteHandler($SLURM_JOB_ID,%d %s);catch me;mslurm.exit(me);end;mslurm.exit(0);""";
+                    run = sprintf(runStr,o.matlabRoot,addPathStr,wd,pv.taskNr,extraIn);
                 end
             elseif pv.command ~=""
                 % The user knows what to do. Run this command as is with srun.
@@ -988,10 +755,10 @@ classdef mslurm < handle
             end
 
 
-            if pv.nrInArray>=1
+            if pv.nrWorkers>=1
                 % Ensure that array job numbers generated by slurm are
                 % base-1 (default is base zero)
-                batchOpts = cat(2,pv.batchOptions,{'array',['1-' num2str(pv.nrInArray)]});
+                batchOpts = cat(2,pv.batchOptions,{'array',['1-' num2str(pv.nrWorkers)]});
                 outFile = mslurm.STDOUTFILE + "_%a.out";
             else
                 batchOpts = pv.batchOptions;
@@ -1490,18 +1257,13 @@ classdef mslurm < handle
             [value(hasMatch)] = cellfun(@(x) (x.value),match(hasMatch));
         end
 
-
-        function fevalRun(jobId,taskNr,pv)
-            % This function runs on the cluster in response to a call to mslurm.feval on the client.
-            % It is not meant to be called directly. See mslurm.feval.
+        function remoteHandler(jobId,taskNr,pv)
+            % This function runs on the cluster in response to a call to
             %
-            % It will run a specified mfile on an element of the specified data array
             % INPUT:
             % jobID = slurm job id
             % taskNr = The number of this job in the array of jobs. This
             % number is used to pick one item from the data array.
-            %
-            % Other properties are specified as parm/value pairs
             %
             % 'mfile'  - The Mfile that will be run,.
             % 'datafile'  - File containing the that will be passed to
@@ -1516,152 +1278,89 @@ classdef mslurm < handle
             arguments
                 jobId (1,1) string
                 taskNr (1,1) double
-                pv.dataFile (1,1) string
-                pv.argsFile (1,1) string = ""
-                pv.mFile (1,1) string
+                pv.mFile (1,1) string % The (user) mFile to call
+                pv.dataFile (1,1) string =""   % The user provided data (if any)
+                pv.argsFile (1,1) string = ""  % Extra inputs to the user mFile
                 pv.nodeTempDir (1,1) string
                 pv.jobDir (1,1) string
             end
-            mslurm.log("fEval: JobID %s runs task %d for %s",jobId,taskNr,pv.mFile);
-
-            dataMatFile = matfile(pv.dataFile); % Matfile object for the data so that we can pass a slice
-            % Load a single element of the data cell aray from the matfile and
-            % pass it to the mfile, together with all the args.
-
-            data = dataMatFile.data(taskNr,:); % Read a row from the cell array
-            if isstruct(data)
-                data = {data};
-            elseif ~iscell(data) %- cannot happen.. numeric is converted to cell in
-                %feval and cell stays cell
-                error("The data in %s  has the wrong type %s",pv.dataFile, class(data));
-            end
-
-            if pv.argsFile ~=""  % args may have extra inputs for the user mfile
-                load(pv.argsFile);
-                result = feval(pv.mFile,data{:},args); % Pass all cells of the row to the mfile as argument (plus optional args)
-            else
-                result = feval(pv.mFile,data{:}); % No args, pass all cells of the row to the mfile as argument
-            end
-
-            % Save the result in the jobDir as 1.result.mat, 2.result.mat
-            mslurm.saveResult( string(taskNr) + ".result.mat" ,result,pv.nodeTempDir,pv.jobDir);
-        end
-
-
-        function fileInFileOutRun(jobId,taskNr,pv)
-            % This function runs on the cluster in response to a call to mslurm.fileInFileOut on the client.
-            % It is not meant to be called directly. call
-            % mslurm.fileInFileOut instead.
-            %
-            % It will run a specified mfile on a file, and save the results
-            % in a different file.
-            %
-            % INPUT:
-            % jobID = slurm job id
-            % taskNr = The number of this job in the array of jobs. This
-            % number is used to pick one item from array of files.
-            %
-            % Other properties are specified as parm/value pairs
-            %
-            % 'mfile'  - The Mfile that will be run,.
-            % 'datafile'  - File containing the list of files to process.
-            % 'argsFile'  - File containing the extra input arguments for
-            % the mfile
-            % 'nodeTempDir' - folder on the nodes where temporary
-            % information can be saved (e.g. /scratch)
-            %
-            arguments
-                jobId (1,1) string
-                taskNr (1,1) double
-                pv.dataFile (1,1) string
-                pv.argsFile (1,1) string = ""
-                pv.mFile (1,1) string
-                pv.jobDir (1,1) string
-            end
-
-            mslurm.log("fileInFileOut: JobID %s runs task %d for %s",jobId,taskNr,pv.mFile);
-
-
-            dataMatFile = matfile(pv.dataFile); % Matfile object for the data so that we can pass a slice
-            if ~isempty(pv.argsFile)  % args may have extra inputs for the user mfile
-                load(p.Results.argsFile);
-            else
-                args = {};
-            end
-            % Load a single element from the file that specifieof the data cell array from the matfile and
-            % pass it to the mfile, together with all the args.
-
-            inFile = dataMatFile.inFile(taskNr,1);
-            inPath = dataMatFile.inPath(taskNr,1);
-            outFile = dataMatFile.outFile(taskNr,1);
-            filename = fullfile(inPath{1},inFile{1});
-
-            if ~exist(filename,"FILE")
-                error("File %s does not exist",filename);
-            end
-
-
-            result = feval(pv.mFile,filename,args{:}); % Pass input file and optional args
-
-            % Save the result first locally then scp to outPath
-            % puts them back to the main path. Local saves are more reliable
-            mslurm.saveResult(outFile,result,pv.nodeTempDir,jobDir);
-        end
-
-        function batchRun(jobId,taskNr,varargin)
-            % This code runs on the cluster in response to a job submitted
-            % with batch. It does some sanity checks, loads any arguments
-            % passed to batch, and passes those to the function as a
-            % struct.
-            p =inputParser;
-            p.addRequired('jobId')
-            p.addRequired('taskNr')
-            p.addParameter('mFile','')
-            p.addParameter('argsFile','')
-            p.addParameter('nodeTempDir','')
-            p.addParameter('jobDir','')
-            p.KeepUnmatched = true;
-            p.parse(jobId,taskNr,varargin{:});
-
             mslurm.log("JobID %s runs task %d for %s",jobId,taskNr,pv.mFile);
 
-
-            if ismember(exist(p.Results.mFile),[2 3 5 6 ]) %#ok<EXIST>  % Executable file
-                mslurm.log("%s batch file found",p.Results.mFile)
-                if isempty(p.Results.argsFile)
-                    % Run as script (workspace will be saved to results
-                    % file).
-                    mslurm.log("Calling %s without input arguments.",p.Results.mFile);
-                    eval(p.Results.mFile);
+            %% Check whether pv pairs were provided that should be passed  to
+            % the user function
+            if pv.argsFile ==""
+                args = {};
+            else
+                if exist(pv.argsFile,"file")
+                    mslurm.log("%s args file found\n",pv.argsFile)
+                    load(pv.argsFile,'args');
                 else
-                    % It is a function, pass arguments struct
-                    if exist(p.Results.argsFile,"file")
-                        mslurm.log("%s args file found\n",p.Results.argsFile)
-                        load(p.Results.argsFile,'args');
-                    else
-                        error("%s argsFile not found.",p.Results.argsFile);
-                    end
+                    error("%s argsFile not found.",pv.argsFile);
+                end
+            end
+
+            %% Check  whether  data should be passed.
+            if pv.dataFile == ""
+                % No data passed
+                passData = false;
+            else
+                if exist(pv.dataFile,"file")
+                    mslurm.log("%s data file found\n",pv.dataFile);
+                    dataMatFile = matfile(pv.dataFile); % Matfile object for the data so that we can pass a slice
+                    % Load a single element of the data cell aray from the matfile and
+                    % pass it to the mfile, together with all the args.
+                    data = dataMatFile.data(taskNr,:); % Read a row from the cell array
+                    passData =true;
+                else
+                    error("%s dataFile not found",pv.dataFile);
+                end
+            end
+
+            %% Check whether the mFile exists and determine function or script
+            % then call the mFile with data and/or args
+            if ismember(exist(pv.mFile),[2 3 5 6 ]) %#ok<EXIST>  % Executable file
+                mslurm.log("%s file found",pv.mFile)
+                try
+                    nout = nargout(pv.mFile);
+                    isFunction= true;
+                catch
+                    isFunction= false;
+                    assert(isempty(data) && isempty(args),'%s is a script, but you are trying to data or parm/value pairs.')
+                end
+                if isFunction
                     % A function, pass the input args as a struct
-                    mslurm.log("Calling %s with %d input arguments (%s).",p.Results.mFile,numel(fieldnames(args)),strjoin(fieldnames(args),'/'));
+                    mslurm.log("Calling %s with %d input arguments (%s).",pv.mFile,numel(fieldnames(args)),strjoin(fieldnames(args),'/'));
                     % Output of the function will be saved to results
-                    nout =nargout(p.Results.mFile);
                     result = cell(1,nout);
-                    [result{:}]= feval(p.Results.mFile,args);      %#ok<NASGU>
+                    if passData
+                        [result{:}]= feval(pv.mFile,data,args{:});
+                    else
+                        [result{:}]= feval(pv.mFile,args{:});
+                    end
+                else
+                    % A script (workspace will be saved to results file).
+                    mslurm.log("Calling %s script.",pv.mFile);
+                    wsBefore = whos;
+                    eval(pv.mFile);
+                    % Make a struct with all variables in the workspace
+                    wsAfter = whos;
+                    out = intersect({wsAfter.name},{wsBefore.name});
+                    wsAfter(out)= [];
+                    result = struct;
+                    for i = 1:length(wsAfter)
+                        result.(wsAfter(i).name)= eval(wsAfter(i).name); % Store the variable value
+                    end
                 end
             else
-                error("%s does not exist. Cannot run this task.",p.Results.mFile)
+                error("%s does not exist. Cannot run this task.",pv.mFile)
             end
-
             %% Save the results
-            % Make a struct with all variables in teh workspace
-            ws = whos;
-            vars = struct;
-            for i = 1:length(ws)
-                vars.(ws(i).name)= eval(ws(i).name); % Store the variable value
-            end
             % Save the result in the jobDir as 1.result.mat, 2.result.mat
-            mslurm.saveResult(string(p.Results.taskNr)+ ".result.mat" ,vars,p.Results.nodeTempDir,p.Results.jobDir);
+            mslurm.saveResult(string(p.Results.taskNr)+ ".result.mat" ,result,pv.nodeTempDir,pv.jobDir);
         end
+
+
+
 
 
 
@@ -1829,6 +1528,7 @@ classdef mslurm < handle
         end
 
         function v = unixfile(varargin)
+            % Same as fullfile , but forces unix pathseparator ('/')
             v = fullfile(varargin{:});
             v = strrep(v,filesep,'/');
         end

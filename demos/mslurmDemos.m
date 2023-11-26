@@ -19,17 +19,16 @@ mslurmApp(cls);
 nrWorkers = 5;
 data = 10*ones(nrWorkers,1);
 options = {'time',10}; % Ask for 10 minutes of wall time.
-jobNames = cls.feval('rand',data,'batchOptions',options); % This will call rand(data(1)) in one matlab sesssion, rand(data(2)) in another etc.
+jobName = cls.remote("rand",'funData',data,'batchOptions',options); % This will call rand(data(1)) in one matlab sesssion, rand(data(2)) in another etc.
 % Click refresh in the mslurmApp to see these jobs, or use cls.sacct
 % Once they have completed, you can retrieve the results with 
-results = cls.retrieve(jobNames);
+results = cls.retrieve(jobName);
 
 %% Another example, using  a data struct array
 % We have reaction time data from 3 subjects.
 data = struct('name',{'Joe','Bill','Mary'},'rt',{[200 300 100],[200 333 1123],[123 300 200]});
 % We want to use a cluster to analyze the data from each subject in a separate job.
-rtJob = cls.feval('analyzeRt',data,'copy',true);
-% The analyzeRt m functon is a simple function that takes one of the
+remote% The analyzeRt m functon is a simple function that takes one of the
 % elements of the struct array as its input, and computes the mean reaction
 % time. Because that function won't be available on the cluster, we set
 % 'copy' to true. 
