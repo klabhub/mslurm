@@ -1178,7 +1178,7 @@ classdef mslurm < handle
     %% Static helper function
     methods (Static)
         function log(msg,varargin)
-            % Writes a message to the command line and adds a clickable link to the relevant line in the m file that generated the message.
+            Writes a message to the command line and adds a clickable link to the relevant line in the m file that generated the message.
             [st] = dbstack('-completenames');
             if length(st)>1
                 fun = st(2).name;
@@ -1189,7 +1189,8 @@ classdef mslurm < handle
                 file = '';
                 line = 0;
             end
-            fprintf(msg + "\t\t (<a href=""matlab:matlab.desktop.editor.openAndGoToLine\t(''%s'',%d);'"">%s@line %d</a>)\n" ,varargin{:},file,line,fun,line);
+           % fprintf(msg + "\n" ,varargin{:});
+            fprintf(msg + "\t\t (%s@line %d</a>)\n" ,varargin{:},file,line);
         end
 
         function T = slurmTime(t)
@@ -1328,6 +1329,7 @@ classdef mslurm < handle
                     assert(isempty(data) && isempty(args),'%s is a script, but you are trying to data or parm/value pairs.')
                 end
                 if isFunction
+                    args
                     % A function, pass the input args as a struct
                     mslurm.log("Calling %s with %d input arguments (%s).",pv.mFile,numel(args)/2,strjoin(args(1:2:end),'/'));
                     % Output of the function will be saved to results
