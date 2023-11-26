@@ -19,16 +19,16 @@ mslurmApp(cls);
 nrWorkers = 5;
 data = 10*ones(nrWorkers,1);
 options = {'time',10}; % Ask for 10 minutes of wall time.
-randTag = cls.feval('rand',data,'batchOptions',options); % This will call rand(data(1)) in one matlab sesssion, rand(data(2)) in another etc.
+jobNames = cls.feval('rand',data,'batchOptions',options); % This will call rand(data(1)) in one matlab sesssion, rand(data(2)) in another etc.
 % Click refresh in the mslurmApp to see these jobs, or use cls.sacct
 % Once they have completed, you can retrieve the results with 
-results = cls.retrieve(randTag);
+results = cls.retrieve(jobNames);
 
 %% Another example, using  a data struct array
 % We have reaction time data from 3 subjects.
 data = struct('name',{'Joe','Bill','Mary'},'rt',{[200 300 100],[200 333 1123],[123 300 200]});
 % We want to use a cluster to analyze the data from each subject in a separate job.
-rtTag = cls.feval('analyzeRt',data,'copy',true);
+rtJob = cls.feval('analyzeRt',data,'copy',true);
 % The analyzeRt m functon is a simple function that takes one of the
 % elements of the struct array as its input, and computes the mean reaction
 % time. Because that function won't be available on the cluster, we set
@@ -36,7 +36,7 @@ rtTag = cls.feval('analyzeRt',data,'copy',true);
 %
 % Once the jobs complete, retrieve the data. Each item in the cell array
 % correponds to the output of a single job (a subject here).
-meanRt = cls.retrieve(rtTag);
+meanRt = cls.retrieve(rtJob);
 
 
 %% Use fileInFileOut
@@ -85,9 +85,9 @@ cls.gitpull(myGithub);  % Pull from the origin on git.
 % match the code on  the client. 
 %% Troubleshooting, the slurmDiagnosis function can come in handy
 % (you can edit/update it with your own diagnostic commands).
-tag = cls.feval('slurmDiagnose','basic');
+diagnosticTag = cls.feval('slurmDiagnose','basic');
 % Once completed, load the output file by pressing 'o' in the gui.
-cls.get
+cls.getFile(diagnosticTag)
 
 
 
