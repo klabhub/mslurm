@@ -1329,12 +1329,13 @@ classdef mslurm < handle
                     assert(isempty(data) && isempty(args),'%s is a script, but you are trying to data or parm/value pairs.')
                 end
                 if isFunction
-                    args
+                    
                     % A function, pass the input args as a struct
                     mslurm.log("Calling %s with %d input arguments (%s).",pv.mFile,numel(args)/2,strjoin(args(1:2:end),'/'));
                     % Output of the function will be saved to results
                     result = cell(1,nout);
                     if passData
+                        data
                         [result{:}]= feval(pv.mFile,data,args{:});
                     else
                         [result{:}]= feval(pv.mFile,args{:});
