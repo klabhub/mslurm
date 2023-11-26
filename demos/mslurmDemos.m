@@ -5,7 +5,6 @@ cls = mslurm;
 cls.connect; % Connect
 cls.sacct; % Update ths cls object with the current state of the accounting by SLURM (e.g.. the list of running jobs)
 cls.sinfo  % Show what the cluster has to offer at this time (see manual for slurm sinfo)
-cls.addPath = "/home/bart/devmslurm";% Add the path to the mslurm installation on the cluster.
 cls.batchOptions = {'time','00:10:00','mem','8GB','cpus-per-task',1};  % Default options for all jobs
 
 % Open the App  to see the jobs that the SLURM schedulre knows about (For

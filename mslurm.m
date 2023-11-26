@@ -723,7 +723,7 @@ classdef mslurm < handle
 
 
             if pv.mFile ~=""              
-                extraIn =sprintf(",'mFile',""%s"",'argsFile',""%s"",'dataFile',""%s"",'nodeTempDir',""%s"",'jobDir',""%s""",pv.mFile,pv.argsFile,pv.dataFile,pv.nodeTempDir,remote);
+                extraIn =sprintf("'mFile',\\""%s\\"",'argsFile',\\""%s\\"",'dataFile',\\""%s\\"",'nodeTempDir',\\""%s\\"",'jobDir',\\""%s\\""",pv.mFile,pv.argsFile,pv.dataFile,pv.nodeTempDir,remote);
                 if pv.startupDirectory==""
                     sd = "";
                 else
@@ -741,10 +741,10 @@ classdef mslurm < handle
                     wd = pv.workingDirectory;
                 end
                 if pv.nrWorkers>=1
-                    runStr = "%s/matlab "  + sd  + " -nodisplay -nodesktop -r ""try;%s;cd '%s';mslurm.remoteHandler($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID %s);catch me;mslurm.exit(me);end;mslurm.exit(0);""";
+                    runStr = "%s/matlab "  + sd  + " -nodisplay -nodesktop -r ""try;%s;cd '%s';mslurm.remoteHandler($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID,%s);catch me;mslurm.exit(me);end;mslurm.exit(0);""";
                     run = sprintf(runStr,o.matlabRoot,addPathStr,wd,extraIn);
                 else
-                    runStr = "%s/matlab " +  sd  + " -nodisplay -nodesktop -r ""try;%s;cd '%s'; mslurm.remoteHandler($SLURM_JOB_ID,%d %s);catch me;mslurm.exit(me);end;mslurm.exit(0);""";
+                    runStr = "%s/matlab " +  sd  + " -nodisplay -nodesktop -r ""try;%s;cd '%s'; mslurm.remoteHandler($SLURM_JOB_ID,%d ,%s);catch me;mslurm.exit(me);end;mslurm.exit(0);""";
                     run = sprintf(runStr,o.matlabRoot,addPathStr,wd,pv.taskNr,extraIn);
                 end
             elseif pv.command ~=""
@@ -971,7 +971,7 @@ classdef mslurm < handle
                 end
                 [pth,f,e] = fileparts(remoteFile);
                 localFile(i) =fullfile(localDir,f+e);
-                if ~exist(localFile(i),"FILE") || p.Results.forceRemote
+                if ~exist(localFile(i),"FILE") || pv.forceRemote
                     if o.exist(remoteFile,"FILE")
                         o.ssh = scp_get(o.ssh,char(f + e),char(localDir),char(pth));
                     else
@@ -1276,7 +1276,7 @@ classdef mslurm < handle
             % stored. (and later retrieved by mslurm.retrieve)
             %
             arguments
-                jobId (1,1) string
+                jobId (1,1) double
                 taskNr (1,1) double
                 pv.mFile (1,1) string % The (user) mFile to call
                 pv.dataFile (1,1) string =""   % The user provided data (if any)
@@ -1329,7 +1329,7 @@ classdef mslurm < handle
                 end
                 if isFunction
                     % A function, pass the input args as a struct
-                    mslurm.log("Calling %s with %d input arguments (%s).",pv.mFile,numel(fieldnames(args)),strjoin(fieldnames(args),'/'));
+                    mslurm.log("Calling %s with %d input arguments (%s).",pv.mFile,numel(args)/2,strjoin(args(1:2:end),'/'));
                     % Output of the function will be saved to results
                     result = cell(1,nout);
                     if passData
