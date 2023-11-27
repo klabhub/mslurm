@@ -4,23 +4,21 @@
 % the Matlab Parallel Server, by simply starting as many Matlab sessions as
 % you request.
 %
-% See README.md for installation and usage instructions.
+% See demos/tutorial.mlx and the README.md for installation and usage instructions.
 %
 % Key functions for the user are
-%   batch() - Run a script (or function with some parm/value pairs) N times in parallel.
-%   feval()  - Analyze each of the rows of an array of data with the same function.
-%   fileInFileOut() - Given a list of files, analyze each file.
+%   install()  - Install preferences that likely stay the same on a client.
+%   remote() - Run a script, function, or expression on the cluster.
 %
-% See also mslurmApp for a graphical interface to running jobs.
+% See Also mslurmApp demos/tutorial.mlx 
+% 
 %
 %
 % BK - Jan 2015
 % June 2017 - Public release.
 % Sept 2023 - Update./Rewrite
-
 %#ok<*ISCLSTR>
 classdef mslurm < handle
-
     properties (Constant)
         PREFGRP     string = "mSlurm"  % Group that stores string preferences for slurm
         PREFS       string = ["user","keyfile","host","remoteStorage","localStorage", "matlabRoot","nodeTempDir","mslurmFolder"];
@@ -38,16 +36,15 @@ classdef mslurm < handle
         keyfile             string  = ""; % Name of the SSH key file. (full name)
         matlabRoot          string  = ""; % Matlab root on the cluster.
         mslurmFolder        string  = ""; % Folder where this mslurm toolbox is installed on the cluster.
-
-        %% Session defaults (can be overruled when submitting specific jobs).
         nodeTempDir         string  = "";  % The path to a directory on a node that can be used to save data temporarily (e.g. /scratch/)
-        startupDirectory    string  = "";  % The directory where matlab will start (-sd command line argument)
+   
+        %% Session defaults (can be overruled when submitting specific jobs).
+         startupDirectory    string  = "";  % The directory where matlab will start (-sd command line argument)
         workingDirectory    string  = ""; % The directory where the code will execute (if unspecified, defaults to remoteStorage location)
         addPath             string = ""; % String array of folders that shoudl be added to the path.
-        batchOptions        = {}; % Options passed to sbatch (parm,value pairs)
+        sbatchOptions        = {}; % Options passed to sbatch (parm,value pairs)
         runOptions          string  = ""; % Options passed to srun
-        env                 = ""; % A string array of environment variable names that will be read from the client environemtn and passed to the cluster. To set a cluster environment variable to a specific value,some of these elements can be "VAR=VALUE"
-
+        env                 = ""; % A string array of environment variable names that will be read from the client environemtn and passed to the cluster. To set a cluster environment variable to a specific value,some of these elements can be "VAR=VALUE"=
     end
 
     properties (Dependent,SetAccess=protected)
@@ -527,7 +524,7 @@ classdef mslurm < handle
             % values set in the cluster object. Anything set here will
             % overrule those defaults.
             %
-            % 'batchOptions' - passed to slurm the same way as in
+            % 'sbatchOptions' - passed to slurm the same way as in
             %                   mslurm.sbatch
             % 'runOptions'  = also passed to slurm. See mslurm.sbatch
             % 'copy' set to true to copy the mfile (fun) to the server.
@@ -553,13 +550,12 @@ classdef mslurm < handle
                 pv.nrWorkers (1,1) double = 0
                 pv.expressionName (1,1) string ="expression"
                 
-                pv.batchOptions (1,:) cell = o.batchOptions
+                pv.sbatchOptions (1,:) cell = o.sbatchOptions
                 pv.runOptions (1,1) string = ""
                 pv.startupDirectory (1,1) string = o.startupDirectory;
                 pv.workingDirectory string = o.workingDirectory;
                 pv.addPath (:,:) string = o.addPath;
-                pv.env (1,1) string = o.env;
-                pv.nodeTempDir (1,1) string =  o.nodeTempDir;
+                pv.env (1,1) string = o.env;                
 
             end
 
@@ -628,11 +624,10 @@ classdef mslurm < handle
             end
 
             %% Start the jobs
-            opts.batchOptions = pv.batchOptions;
+            opts.sbatchOptions = pv.sbatchOptions;
             opts.mfile =fun;
             opts.argsFile =remoteArgsFile;
-            opts.dataFile= remoteDataFile;
-            opts.nodeTempDir = pv.nodeTempDir;
+            opts.dataFile= remoteDataFile;            
             opts.debug = pv.debug;
             opts.runOptions= pv.runOptions;
             opts.nrWorkers = pv.nrWorkers;
@@ -657,7 +652,7 @@ classdef mslurm < handle
             % that the user specifies in the call to this sbatch fubction.
             % mfileExtraInput = The third and later input arguments to the mfile
             % command.
-            % batchOptions =  a cell array with parm./value pairs that will
+            % sbatchOptions =  a cell array with parm./value pairs that will
             %                   be used  in the batch file as follows:
             %                           #SBATCH= --parm=value
             %                   See the man pages for sbatch on the SLURM
@@ -703,7 +698,7 @@ classdef mslurm < handle
                 jobName (1,1) string
                 local (1,1) string
                 remote (1,1) string
-                pv.batchOptions (1,:) cell = o.batchOptions
+                pv.sbatchOptions (1,:) cell = o.sbatchOptions
                 pv.runOptions (1,1) string = ""
                 pv.mFile (1,1) string = ""
                 pv.argsFile (1,1) string = ""
@@ -752,32 +747,32 @@ classdef mslurm < handle
 
                 % Ensure that array job numbers generated by slurm are
                 % base-1 (default is base zero)
-                batchOpts = cat(2,pv.batchOptions,{'array',['1-' num2str(pv.nrWorkers)]});
+                sbatchOpts = cat(2,pv.sbatchOptions,{'array',['1-' num2str(pv.nrWorkers)]});
                 outFile = mslurm.STDOUTFILE + "_%a.out";
            
             % Add the sbatch options
             % Options with empty values are removed.
-            empty = find(cellfun(@isempty,batchOpts(2:2:end)));
-            batchOpts([2*empty-1 2*empty])= [];
-            empty = find(cellfun(@(x) (isstring(x) && x==""),batchOpts(2:2:end)));
-            batchOpts([2*empty-1 2*empty])= [];
+            empty = find(cellfun(@isempty,sbatchOpts(2:2:end)));
+            sbatchOpts([2*empty-1 2*empty])= [];
+            empty = find(cellfun(@(x) (isstring(x) && x==""),sbatchOpts(2:2:end)));
+            sbatchOpts([2*empty-1 2*empty])= [];
 
             batchFile = mslurm.SBATCHFILE;
             fid  =fopen(fullfile(local,mslurm.SBATCHFILE) ,'w'); % no t (unix line endings are needed)
             fprintf(fid,'#!/bin/bash\n');
-            batchOpts = cat(2,batchOpts, {'job-name',jobName,'output',outFile,'error',outFile});
-            for opt=1:2:numel(batchOpts)
-                if isempty(batchOpts{opt+1})
-                    fprintf(fid,'#SBATCH --%s\n',batchOpts{opt});
-                elseif isnumeric(batchOpts{opt+1})
-                    fprintf(fid,'#SBATCH --%s=%d\n',batchOpts{opt},batchOpts{opt+1});
-                elseif ischar(batchOpts{opt+1}) || isstring(batchOpts{opt+1})
-                    isSpace  = strcmpi(batchOpts{opt+1},' ');
+            sbatchOpts = cat(2,sbatchOpts, {'job-name',jobName,'output',outFile,'error',outFile});
+            for opt=1:2:numel(sbatchOpts)
+                if isempty(sbatchOpts{opt+1})
+                    fprintf(fid,'#SBATCH --%s\n',sbatchOpts{opt});
+                elseif isnumeric(sbatchOpts{opt+1})
+                    fprintf(fid,'#SBATCH --%s=%d\n',sbatchOpts{opt},sbatchOpts{opt+1});
+                elseif ischar(sbatchOpts{opt+1}) || isstring(sbatchOpts{opt+1})
+                    isSpace  = strcmpi(sbatchOpts{opt+1},' ');
                     if any(isSpace)
-                        batchOpts{opt+1}(isSpace) = '';
-                        mslurm.log(['Removing spaces from Slurm Batch Option ''' batchOpts{opt} ''' now set to:''' batchOpts{opt+1} '''']);
+                        sbatchOpts{opt+1}(isSpace) = '';
+                        mslurm.log(['Removing spaces from Slurm Batch Option ''' sbatchOpts{opt} ''' now set to:''' sbatchOpts{opt+1} '''']);
                     end
-                    fprintf(fid,'#SBATCH --%s=%s\n',batchOpts{opt},batchOpts{opt+1});
+                    fprintf(fid,'#SBATCH --%s=%s\n',sbatchOpts{opt},sbatchOpts{opt+1});
                 else
                     error('sbatch options should be char or numeric');
                 end
@@ -844,34 +839,38 @@ classdef mslurm < handle
         end
 
 
-        function [list] = retry(o,varargin)
-            % Check the slurm acct log and retry all jobs that failed.
-            % 'starttime'  - retry only jobs submitted after this time
-            % 'endtime' - retry only jobs submitted before this time
-            % 'list'  - show and return a list only.
-            % 'maxNrFails' - Do not attempt to retry jobs that failed this
-            % number of times.
-            % OUTPUT
-            % failedJobs = A list of jobNames that failed (cell)
-            % giveUpIx  =  An logical index into failedJobs with the jobs
-            % that failed more often than maxNrFails
-            % msg = cell array of messages about the retry.
-            % 'callSacct' = set to true to force rereading the sacct log.
-            % [true]
-            %
-            p=inputParser;
-            p.addParameter('maxNrFails',10,@isnumeric);
-            p.addParameter('selection',[],@isnumeric); %
-            p.addParameter('jobId',[],@(x)(ischar(x) || iscell(x)));
-            p.parse(varargin{:});
-
-            if o.nrJobs==0
-                list = {};
-                mslurm.log('No jobs found')
-            else
-                %TODO rewrite using scontrol requeue jobID_arrayID
-
+        function retry(o,job,pv)
+            % Retry a named job 
+            % 'callSacct' = set to true to force rereading the sacct log. [true]
+            % TODO : check whether the job was actually requeued. Somehow
+            % this does not seem to work for all jobs?
+            arguments
+                o (1,1) mslurm
+                job (1,1) string
+                pv.sacct (1,1) logical = true
             end
+            if pv.sacct
+                o.sacct; % Update the jobs log
+            end
+            allJobs = [o.jobs];
+            if any(contains(job,'-'))
+                %A job name ;find the corresponding ID first.
+                tf= ismember(job,{allJobs.JobName});
+            else
+                % A job number (xxx_x)
+                tf= ismember(job,{allJobs.JobID});
+            end
+            if ~all(tf)
+                fprintf('No matching job found for %s\n',strjoin(job(~tf),'/'))
+            end
+            jobIds = {allJobs(tf).JobID};
+            if numel(jobIds)>0
+                cmd = "scontrol requeue " +  sprintf("%s ",jobIds{:});
+                result = o.command(cmd); %#ok<NASGU>
+            else
+                fprintf('Nothing to retry.\n')
+            end
+          
         end
 
 
