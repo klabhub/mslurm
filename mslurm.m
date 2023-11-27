@@ -1345,6 +1345,8 @@ classdef mslurm < handle
                     wsAfter = whos;
                     [~,out] = intersect({wsAfter.name},{wsBefore.name});
                     wsAfter(out)= [];
+                    out = strcmpi({wsAfter.name},'wsBefore');
+                    wsAfter(out)= [];
                     result = struct;
                     for i = 1:length(wsAfter)
                         result.(wsAfter(i).name)= eval(wsAfter(i).name); % Store the variable value
