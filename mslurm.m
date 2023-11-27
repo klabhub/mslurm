@@ -510,7 +510,7 @@ classdef mslurm < handle
         end
 
 
-        function jobName = remote(o,fun,data,args,pv)
+        function jobName = remote(o,fun,data,pv)
             % Evaluate the mfile (fun) in each of the 'nrWorkers'
             %
             % The mfile can be a script or a function that takes
@@ -546,8 +546,8 @@ classdef mslurm < handle
             arguments
                 o (1,1) mslurm
                 fun (1,1)
-                data (:,:) =[]
-                args (1,:) cell ={}
+                data (:,:) =[]                
+                pv.args (1,:) cell ={}
                 pv.debug (1,1) logical  = false
                 pv.copy (1,1) logical  = false
                 pv.nrWorkers (1,1) double = 0
@@ -581,7 +581,8 @@ classdef mslurm < handle
             [local,remote,jobName]= setupJob(o,fun);
 
             %% Save parm/value pairs that should be passed
-            if ~isempty(args)
+            if ~isempty(pv.args)
+                args = pv.args;
                 argsFile = jobName + "_args.mat";
                 % Save a local copy of the args
                 localArgsFile = fullfile(local,argsFile);
@@ -1294,6 +1295,7 @@ classdef mslurm < handle
             if pv.dataFile == ""
                 % No data passed
                 passData = false;
+                data =[];
             else
                 if exist(pv.dataFile,"file")
                     mslurm.log("%s data file found\n",pv.dataFile);
