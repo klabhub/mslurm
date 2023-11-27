@@ -548,12 +548,13 @@ classdef mslurm < handle
                 fun (1,1)
                 data (:,:) =[]
                 args (1,:) cell ={}
-                pv.batchOptions (1,:) cell = o.batchOptions
-                pv.runOptions (1,1) string = ""
                 pv.debug (1,1) logical  = false
                 pv.copy (1,1) logical  = false
                 pv.nrWorkers (1,1) double = 0
                 pv.expressionName (1,1) string ="expression"
+                
+                pv.batchOptions (1,:) cell = o.batchOptions
+                pv.runOptions (1,1) string = ""
                 pv.startupDirectory (1,1) string = o.startupDirectory;
                 pv.workingDirectory string = o.workingDirectory;
                 pv.addPath (:,:) string = o.addPath;
@@ -569,9 +570,9 @@ classdef mslurm < handle
                 fid = fopen(mfilename,'w');
                 fprintf(fid,'%s\n',fun);
                 fclose(fid);
-                fun =p.Results.expressionName;
+                fun =pv.expressionName;
                 copy = true; % Have to copy
-                assert(isempty(pv.funData),'Passing data to an expression is not supported. Use a function for ''fun'' instead')
+                assert(isempty(data),'Passing data to an expression is not supported. Use a function for ''fun'' instead')
             else
                 mfilename = which(fun);
                 copy = pv.copy;
@@ -728,8 +729,8 @@ classdef mslurm < handle
                 else
                     sd = "-sd " +   pv.startupDirectory;
                 end
-                addPth =pv.addPath + ":" + o.mslurmFolder; % Always add the mslurmFolder to the path
-                addPathStr = sprintf("addpath('%s')",addPth);
+                pv.addPth =[pv.addPath o.mslurmFolder]; % Always add the mslurmFolder to the path
+                addPathStr = sprintf("addpath('%s')",strjoin(pv.addPath,':'));
                 if pv.workingDirectory ==""
                     % Run in remoteStorage directoryc
                     wd = remote;

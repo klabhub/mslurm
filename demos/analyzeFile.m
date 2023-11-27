@@ -1,13 +1,16 @@
 function result = analyzeFile(filename)
-% Example function to demonstrate slurm.fileInFileOut
+% Example function to demonstrate 
 % 
-% When called apporpriately with slurm.feval, this function will be called
+% When called apporpriately with mslurm.remote, this function will be called
 % with a single file as its 'filename' input argument. The code below checks that
 % this is the case and then does some (nonsensical) analysis on the file
 %
-% See Also mslurmDemos. 
+% See Also tutorial.mlx
+arguments
+    filename (1,1) string
+end
 
-if ~ischar(filename) || ~exist(filename,'file')
+if ~exist(filename,'file')
     error('analyzeFile requires the name of a single, existing file as its input');
 end
 
