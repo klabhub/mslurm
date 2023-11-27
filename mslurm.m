@@ -510,7 +510,7 @@ classdef mslurm < handle
         end
 
 
-        function jobName = remote(o,fun,pv)
+        function jobName = remote(o,fun,data,args,pv)
             % Evaluate the mfile (fun) in each of the 'nrWorkers'
             %
             % The mfile can be a script or a function that takes
@@ -546,8 +546,8 @@ classdef mslurm < handle
             arguments
                 o (1,1) mslurm
                 fun (1,1)
-                pv.funData (:,:) =[]
-                pv.funParmValue (1,:) cell ={}
+                data (:,:) =[]
+                args (1,:) cell ={}
                 pv.batchOptions (1,:) cell = o.batchOptions
                 pv.runOptions (1,1) string = ""
                 pv.debug (1,1) logical  = false
@@ -580,8 +580,7 @@ classdef mslurm < handle
             [local,remote,jobName]= setupJob(o,fun);
 
             %% Save parm/value pairs that should be passed
-            if ~isempty(pv.funParmValue)
-                args = pv.funParmValue;
+            if ~isempty(args)
                 argsFile = jobName + "_args.mat";
                 % Save a local copy of the args
                 localArgsFile = fullfile(local,argsFile);
@@ -594,12 +593,10 @@ classdef mslurm < handle
             end
 
 
-            if isempty(pv.funData)
+            if isempty(data)
                 remoteDataFile = "";
-                assert(pv.nrWorkers>0,"nrWorkers must be larger than zero (%d)" ,pv.nrWorkers)
-           
+                assert(pv.nrWorkers>0,"nrWorkers must be larger than zero (%d)" ,pv.nrWorkers)          
             else
-                data =pv.funData;
                 if ischar(data)
                     % Assume that a single string input means pass this string
                     % to a single worker (and not pass each character to a
@@ -1182,7 +1179,7 @@ classdef mslurm < handle
                 line = 0;
             end
            % fprintf(msg + "\n" ,varargin{:});
-            fprintf(msg + "\t\t (%s@line %d</a>)\n" ,varargin{:},fun,line);
+            fprintf(msg + "\t\t (%s@line %d)\n" ,varargin{:},fun,line);
         end
 
         function T = slurmTime(t)
@@ -1302,7 +1299,13 @@ classdef mslurm < handle
                     dataMatFile = matfile(pv.dataFile); % Matfile object for the data so that we can pass a slice
                     % Load a single element of the data cell aray from the matfile and
                     % pass it to the mfile, together with all the args.
-                    data = dataMatFile.data(taskNr,:); % Read a row from the cell array
+                    try
+                        data = dataMatFile.data(taskNr,:); % Read a row from the cell array
+                    catch
+                        % Data cannot be loaded line by line. Load all.
+                        load(pv.dataFile,'data');
+                        data = data(taskNr,:);
+                    end
                     passData =true;
                 else
                     error("%s dataFile not found",pv.dataFile);

@@ -1,24 +1,23 @@
 function result = slurmDiagnose(options)
 % Utility function to run diagnostics on the server. Run this with
-% slurm.feval and then look at the result with slurm.retrieve or inspect
-% the logs from the slurmApp.
-% The options are (a cell array of) strings that describe what will be
+% mslurm.remote and then look by inspecting the logs from the slurmApp or
+% with mslurm.getFile.
+% The options are (an array of) strings that describe what will be
 % done:
-%  'basic' : some general diagnostics about the node where Matlab runs
+%  "basic" : some general diagnostics about the node where Matlab runs
 %
 % EXAMPLE:
-% s.feval('slurmDiagnose',{'basic'})
+% s.remote("slurmDiagnose","BASIC")
 % will perform the basic diagnosis on a single node.
-% s.feval('slurmDiagnose',repmat({'basic'},[1,3]))
+% s.feval("slurmDiagnose",repmat("basic",[1,3]))
 % will perform the basic diagnosis on three nodes/workers.
 %
 % BK - June 2017
+arguments 
+    options (1,:) string = "BASIC"
+end
 
 result = [];  % Most diagnoses don't return values, Just inspect the logfile.
-
-if ischar(options)
-    options = {options};
-end
 
 for o=1:numel(options)
     switch upper(options{o})

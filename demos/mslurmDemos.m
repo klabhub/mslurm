@@ -1,4 +1,4 @@
-
+%% Tutorial 
 %% If you followed the readme, you already ran mslurm.install to set preferences 
 % for connecting to a cluster. This call uses those preferences
 cls = mslurm; 
