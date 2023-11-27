@@ -42,9 +42,9 @@ classdef mslurm < handle
          startupDirectory    string  = "";  % The directory where matlab will start (-sd command line argument)
         workingDirectory    string  = ""; % The directory where the code will execute (if unspecified, defaults to remoteStorage location)
         addPath             string = ""; % String array of folders that shoudl be added to the path.
-        sbatchOptions        = {}; % Options passed to sbatch (parm,value pairs)
+        sbatchOptions        cell = {}; % Options passed to sbatch (parm,value pairs)
         runOptions          string  = ""; % Options passed to srun
-        env                 = ""; % A string array of environment variable names that will be read from the client environemtn and passed to the cluster. To set a cluster environment variable to a specific value,some of these elements can be "VAR=VALUE"=
+        env                 string = ""; % A string array of environment variable names that will be read from the client environemtn and passed to the cluster. To set a cluster environment variable to a specific value,some of these elements can be "VAR=VALUE"=
     end
 
     properties (Dependent,SetAccess=protected)
@@ -554,8 +554,8 @@ classdef mslurm < handle
                 pv.runOptions (1,1) string = ""
                 pv.startupDirectory (1,1) string = o.startupDirectory;
                 pv.workingDirectory string = o.workingDirectory;
-                pv.addPath (:,:) string = o.addPath;
-                pv.env (1,1) string = o.env;                
+                pv.addPath (1,:) string = o.addPath;
+                pv.env (1,:) string = o.env;                
 
             end
 
@@ -708,9 +708,9 @@ classdef mslurm < handle
                 pv.debug (1,1) logical  = false
                 pv.taskNr (1,1) double  = 0
                 pv.startupDirectory (1,1) string = o.startupDirectory;
-                pv.workingDirectory string = o.workingDirectory;
-                pv.addPath (:,:) string = o.addPath;
-                pv.env (1,1) string = o.env;
+                pv.workingDirectory (1,1) string = o.workingDirectory;
+                pv.addPath (1,:) string = o.addPath;
+                pv.env (1,:) string = o.env;
                 pv.nodeTempDir (1,1) = o.nodeTempDir;
             end
 
