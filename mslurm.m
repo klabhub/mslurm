@@ -1343,7 +1343,7 @@ classdef mslurm < handle
                     eval(pv.mFile);
                     % Make a struct with all variables in the workspace
                     wsAfter = whos;
-                    out = intersect({wsAfter.name},{wsBefore.name});
+                    [~,out] = intersect({wsAfter.name},{wsBefore.name});
                     wsAfter(out)= [];
                     result = struct;
                     for i = 1:length(wsAfter)
