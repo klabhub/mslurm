@@ -725,7 +725,7 @@ classdef mslurm < handle
                 else
                     sd = "-sd " +   pv.startupDirectory;
                 end
-                pv.addPth =[pv.addPath o.mslurmFolder]; % Always add the mslurmFolder to the path
+                pv.addPath =[pv.addPath o.mslurmFolder]; % Always add the mslurmFolder to the path
                 addPathStr = sprintf("addpath('%s')",strjoin(pv.addPath,':'));
                 if pv.workingDirectory ==""
                     % Run in remoteStorage directoryc
