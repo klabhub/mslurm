@@ -39,7 +39,7 @@ classdef mslurm < handle
         nodeTempDir         string  = "";  % The path to a directory on a node that can be used to save data temporarily (e.g. /scratch/)
    
         %% Session defaults (can be overruled when submitting specific jobs).
-         startupDirectory    string  = "";  % The directory where matlab will start (-sd command line argument)
+        startupDirectory    string  = "";  % The directory where matlab will start (-sd command line argument)
         workingDirectory    string  = ""; % The directory where the code will execute (if unspecified, defaults to remoteStorage location)
         addPath             string = ""; % String array of folders that shoudl be added to the path.
         sbatchOptions        cell = {}; % Options passed to sbatch (parm,value pairs)

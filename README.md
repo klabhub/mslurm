@@ -1,8 +1,10 @@
-# mslurm
+# mslurm Matlab Toolbox
 
-This is a toolbox to send Matlab jobs from your local machine (the client) to an HPC cluster running the SLURM scheduler (the server). As long as you have unlimited licenses to run Matlab on the cluster, this allows you to run many jobs in parallel, without the distributed computing server license. This only works for "dumb" parallelism though; messaging between jobs is not used. A simple app shows information from the slurm acccounting log on the server, can retrieve data and log files, and allows you to restart failed jobs.
+*Bart Krekelberg - 2015 / June 2017 - Public release / Nov 2023 - Major revision. Release V2.0.*
 
-***Note that this toolbox does not use the Matlab Parallel Server. The disadvantage is that its many nice/useful features are not accessible. The advantage is that you don't need a MPS license. If you have an MPS license, then [kSlurm](https://github.com/klabhub/kSlurm) may be a better option for you. Although you should be warned that debugging code that runs through MPS is not for the faint of heart (I gave up).***
+This Matlab toolbox sends jobs from your local machine (the client) to an HPC cluster running the SLURM scheduler (the server). As long as you have unlimited licenses to run Matlab on the cluster, this allows you to run many jobs in parallel, without the Matlab Compute Server (aka distributed computing server) license. This only works for "dumb" parallelism though; messaging between jobs is not used. A simple app shows information from the slurm acccounting log on the server, can retrieve data and log files, and allows you to restart failed jobs.
+
+***This toolbox does not use the Matlab Compute Server. The [kSlurm](https://github.com/klabhub/kSlurm) toolbox does use MCS, but, in my experience, the features of MCS are not worth the complexity of using it (unexplained Matlab segfault crashes, missing diary files making it impossible to find bugs, etc.).***
 
 ## Installation
 
@@ -42,7 +44,7 @@ Clone the mslurm repository to the client.
 git clone https://github.com/klabhub/mslurm
 ```
 
-Remember the path (e.g., `c:\github\mslurm`) where the toolbox was cloned. Add the folder to the Matlab search path on the client. Use 'Set Path' in the Matlab IDE or:
+Remember the path (e.g., `c:\github\mslurm`) where the toolbox was cloned. Add that folder to the Matlab search path on the client. Use 'Set Path' in the Matlab IDE or:
 
 ```matlab
 addpath('c:\github\mslurm')
@@ -93,7 +95,7 @@ The jobs posted to SLURM in each session typically share several parameters. You
 - **startupDirectory:** The folder where Matlab will start (this could be a place where your startup.m and pathdef.m live).
 - **workingDirectory:** The folder where the jobs will execute. If left unspecified (""), this will use a subfolder of the remoteStorage folder created spefically for the job.
 - **addPath:** A string array specifying the path(s) that should be included on the cluster. This  will be passed to addpath() on the cluster.
-- **batchOptions:** A cell array of parameter/value pairs that are passed verbatim to the slurm sbatch command. See the [man page for sbatch for all options](https://slurm.schedmd.com/sbatch.html). These options are key to requesting the right kind of compute nodes for your job.
+- **sbatchOptions:** A cell array of parameter/value pairs that are passed verbatim to the slurm sbatch command. See the [man page for sbatch for all options](https://slurm.schedmd.com/sbatch.html). These options are key to requesting the right kind of compute nodes for your job.
 - **runOptions:** A string that is passed verbatim to the ```srun``` command. You probably do not need this, but see the [man page](https://slurm.schedmd.com/srun.html) for valid options.
 - **env:** A string array with environment variables. These are read from the environment on the client and set on the cluster. To set a specific value that differs from the value set on the client, use "VAR=VALUE".
 
@@ -101,16 +103,16 @@ For example:
 
 ```matlab
 c.addPath = "/home/bart/tools"; % Make sure that my tools folder is  accessible on the cluster. 
-c.batchOptions = {'mem','32GB','time',30}; %Request workers with at least 32GB of memory and a wall time of 30 minutes. 
+c.sbatchOptions = {'mem','32GB','time',30}; %Request workers with at least 32GB of memory and a wall time of 30 minutes. 
 c.env = ["HOST" "USER" "HOME=/home/joe"] % Read the HOST and USER environment variables from the client, but set the HOME variable to /home/joe.
 ```
 
 ## Usage
 
-See demos/mslurmDemos.m for walktrough of various susage scenarios.
+See demos/tutorial.mlx for walktrough of various susage scenarios.
 
 ## Extending the toolbox
 
-The slurm.sbatch function is the low-level workhorse that submits jobs to SLURM. You can call this directly from your code to make SLURM do anything you want. The slurm.feval, slurm.fileInFileOut, and slurm.batch functions are wrappers around slurm.sbatch that support specific workflows (see mslurmDemos.m).You can use them as is,modify them to match your workflow, or create new wrappers that better suit your workflow.
+The slurm.sbatch function is the low-level workhorse that submits jobs to SLURM. You can call this directly from your code to make SLURM do anything you want. The mslurm.remote function (the main workhorse that can be used for many scenarios; see demos/tutorial.mlx)  shows one way of simplifying the calls, but ultimately calls nslurm.sbatch. You can use mslurm.remote or create a new wrapper around mslurm.sbatch that better suits your workflow.
 
 [![DOI](https://zenodo.org/badge/93510696.svg)](https://zenodo.org/badge/latestdoi/93510696)
