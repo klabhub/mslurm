@@ -846,26 +846,23 @@ classdef mslurm < handle
             % this does not seem to work for all jobs?
             arguments
                 o (1,1) mslurm
-                job (1,1) string
+                job (1,:) string
                 pv.sacct (1,1) logical = true
             end
             if pv.sacct
                 o.sacct; % Update the jobs log
             end
             allJobs = [o.jobs];
-            if any(contains(job,'-'))
-                %A job name ;find the corresponding ID first.
-                tf= ismember(job,{allJobs.JobName});
-            else
-                % A job number (xxx_x)
-                tf= ismember(job,{allJobs.JobID});
-            end
-            if ~all(tf)
-                fprintf('No matching job found for %s\n',strjoin(job(~tf),'/'))
-            end
+            isJobName = contains(job,"-");
+            %A job name ;find the corresponding ID first.
+            tf= ismember({allJobs.JobName},job(isJobName));
+            % A job number (xxx_x)
+            tf = tf | ismember({allJobs.JobID},job(~isJobName));
+            
+           
             jobIds = {allJobs(tf).JobID};
             if numel(jobIds)>0
-                cmd = "scontrol requeue " +  sprintf("%s ",jobIds{:});
+                cmd = "scontrol requeue " +  sprintf("%s, ",jobIds{:});
                 result = o.command(cmd); %#ok<NASGU>
             else
                 fprintf('Nothing to retry.\n')
