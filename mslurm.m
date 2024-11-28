@@ -53,6 +53,7 @@ classdef mslurm < handle
         isConnected logical;    % Check that we have an open SSH connection to the cluster.
         failState;              % Current state of each of the jobs in the log.
         failStateName;
+        mustReconnect logical; % True if the ssh connection has to be changed.
     end
     properties (SetAccess=protected, GetAccess=public)
         jobs;                    % A structure with the information retrieved from the slurm accounting logs (see the sacct function below)
@@ -65,6 +66,14 @@ classdef mslurm < handle
 
     %% Get/set methods for dependent properties
     methods
+        function v = get.mustReconnect(o)
+           if isempty(o.ssh)
+                 v= true;
+           else
+                v = ~(strcmpi(o.host,o.ssh.hostname) && strcmpi(o.user,o.ssh.username));
+           end
+           if v; fprintf('Reconnecting to %s as %s ...',o.host,o.user);end
+        end
         function v=get.pwd(o)
             v = command(o,'pwd');
         end
@@ -73,6 +82,7 @@ classdef mslurm < handle
             v = length(o.jobs);
         end
         function v=get.isConnected(o)
+            if o.mustReconnect;o.connect;end            
             v = ~isempty(o.ssh) && ~isempty(o.ssh.connection);
         end
 
@@ -245,6 +255,7 @@ classdef mslurm < handle
                 cmd = sprintf(cmd,varargin{:});
             end
             if ~isempty(o.ssh)
+                if o.mustReconnect;o.connect;end
                 USESSHERR = nargout('ssh2_command')==3; % If you have the klab SSH fork it returns err messages for debugging. Otherwise keep this as false.
                 try
                     if USESSHERR
@@ -306,6 +317,7 @@ classdef mslurm < handle
             if ~exist(filename,"FILE")
                 error('Local file %s not found. Cannot copy to cluster.',filename)
             end
+            if o.mustReconnect;o.connect;end
             [localPath,filename,ext] = fileparts(filename);
             filename = filename + ext;
             if nargin<3
@@ -332,6 +344,7 @@ classdef mslurm < handle
                 remoteJobDir (1,1) string = o.remoteStorage
                 deleteRemote (1,1) logical = false
             end
+            if o.mustReconnect;o.connect;end
             if ischar(files)
                 files= {files};
             end
@@ -370,7 +383,7 @@ classdef mslurm < handle
                 mkdir(o.localStorage);
             end
             %o.ssh.autoreconnect = true; % Seems to make connection slower?
-            result = o.command("scontrol show config | sed -n ''/^MaxArraySize/s/.*= *//p''");
+            result = o.command("scontrol show config | sed -n '/^MaxArraySize/s/.*= *//p'");
             o.maxArraySize = str2double(result{1});
         end
 
@@ -390,6 +403,7 @@ classdef mslurm < handle
                 o (1,1) mslurm
                 options (1,1) string = ""
             end
+            if o.mustReconnect;o.connect;end
             id = string(datetime("now",'Format','sss'));
             filename = "smap.output." +  id + ".txt";
             msg = o.command(" smap %s -c > %s/%s",options, o.remoteStorage,filename);
@@ -842,32 +856,77 @@ classdef mslurm < handle
         function retry(o,job,pv)
             % Retry a named job 
             % 'callSacct' = set to true to force rereading the sacct log. [true]
-            % TODO : check whether the job was actually requeued. Somehow
-            % this does not seem to work for all jobs?
             arguments
                 o (1,1) mslurm
                 job (1,:) string
                 pv.sacct (1,1) logical = true
             end
             if pv.sacct
-                o.sacct; % Update the jobs log
+                   o.sacct; % Update the jobs log
             end
             allJobs = [o.jobs];
             isJobName = contains(job,"-");
             %A job name ;find the corresponding ID first.
             tf= ismember({allJobs.JobName},job(isJobName));
             % A job number (xxx_x)
-            tf = tf | ismember({allJobs.JobID},job(~isJobName));
-            
-           
+            tf = tf | ismember({allJobs.JobID},job(~isJobName));                      
             jobIds = {allJobs(tf).JobID};
-            if numel(jobIds)>0
-                cmd = "scontrol requeue " +  sprintf("%s, ",jobIds{:});
-                result = o.command(cmd); %#ok<NASGU>
+            jobName = string(unique({allJobs(tf).JobName}));
+            assert(numel(jobName)==1,"Retry must be done one job at a time (multiple elements of an array job are allowed)");
+            
+            ff = fullfile(o.localStorage,jobName,o.SBATCHFILE);
+            if ~exist(ff,'file')
+                error('')
             else
-                fprintf('Nothing to retry.\n')
-            end
-          
+                fid = fopen(ff,"r");
+                newContent = [];                
+                while (fid~=-1)
+                   line =  fgetl(fid);
+                   if line==-1;break;end
+                   match = regexp(line,'#SBATCH --(?<opt>[\w\d-\.]+)=(?<val>[\w\d\.-]+)','names');
+                   if isempty(match)
+                         thisNewContent = sprintf("%s\n",line);
+                   else
+                       switch upper(match.opt)
+                           case 'JOB-NAME'
+                               newJobName = ['retry' match.val];
+                               thisNewContent = sprintf('#SBATCH --job-name=%s\n',newJobName);                         
+                           case 'ARRAY'                               
+                               match = regexp(jobIds,'(?<jobNr>\d+)_(?<arrayNr>\d+)','names');
+                               if isempty(match)
+                                    fclose(fid);
+                                    error('JobID does not match the xxxx_xx format')
+                               else
+                                    match = [match{:}];
+                                    arrayNr = string({match.arrayNr});
+                                end
+                               thisNewContent = sprintf('#SBATCH --array=%s\n',strjoin(arrayNr,","));
+                           otherwise 
+                               % Unchanged property
+                               thisNewContent = sprintf("%s\n",line);
+                       end
+                   end
+                       newContent =[newContent; thisNewContent]; %#ok<AGROW>
+                end
+                fclose(fid);
+                fid = fopen(ff,"w");
+                fprintf(fid, '%s',newContent);
+                fclose(fid);
+
+                % Copy the flie to the cluster
+                remote= mslurm.unixfile(o.remoteStorage,jobName);
+                o.put(ff,remote);
+                % Start the sbatch
+                [result,err] = o.command(sprintf("cd %s ;sbatch %s/%s",remote,remote,o.SBATCHFILE));
+                jobId = str2double(regexp(result{1},'\d+','match'));
+                if isempty(jobId) || isnan(jobId)
+                    mslurm.log("Failed to submit %s ",jobName)
+                    result{1} %#ok<NOPRT>
+                    err{1}%#ok<NOPRT>
+                else
+                    mslurm.log("Successfully re-submitted %s as %s (JobID= %d)",jobName, newJobName, jobId );
+                end
+            end            
         end
 
 
@@ -918,7 +977,7 @@ classdef mslurm < handle
                 pv.forceRemote (1,1) logical =true
                 pv.type (1,1) string {mustBeMember(pv.type,["OUT" "ERR" "SH"])} = "OUT"
             end
-
+            if o.mustReconnect;o.connect;end
             if any(contains(job,'-'))
                 %A job name ;find the corresponding ID first.
                 [tf,ix]= ismember(job,{o.jobs.JobName});
