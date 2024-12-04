@@ -1560,6 +1560,9 @@ classdef mslurm < handle
                 end
                 value = string(input(msg,'s'));
                 if value~=""
+                    if contains(value,'~')
+                        fprintf(2,"Relative paths (~) may cause connection/execution problems. If this (%s) does not work, try specifying the absolute path.\n",value);
+                    end
                     mslurm.setpref(p,value)
                     fprintf('Set %s to %s\n',p,value);
                 else
