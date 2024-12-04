@@ -21,7 +21,7 @@
 classdef mslurm < handle
     properties (Constant)
         PREFGRP     string = "mSlurm"  % Group that stores string preferences for slurm
-        PREFS       string = ["user","keyfile","host","remoteStorage","localStorage", "matlabRoot","nodeTempDir","mslurmFolder"];
+        PREFS       string = ["user","keyfile","keypass","host","remoteStorage","localStorage", "matlabRoot","nodeTempDir","mslurmFolder"];
         SBATCHFILE  string = "mslurmSBatch.sh";
         STDOUTFILE  string = "stdout";
         STDERRFILE  string = "stderr";
@@ -34,6 +34,7 @@ classdef mslurm < handle
         host                string  = ""; % Host Address
         user                string  = ""; % Remote user name
         keyfile             string  = ""; % Name of the SSH key file. (full name)
+        keypass             string  = ""; % Password for the SSH key file. 
         matlabRoot          string  = ""; % Matlab root on the cluster.
         mslurmFolder        string  = ""; % Folder where this mslurm toolbox is installed on the cluster.
         nodeTempDir         string  = "";  % The path to a directory on a node that can be used to save data temporarily (e.g. /scratch/)
@@ -138,6 +139,7 @@ classdef mslurm < handle
                 pv.host (1,1) string = mslurm.getpref('host');
                 pv.user (1,1) string = mslurm.getpref('user');
                 pv.keyfile (1,1) string =mslurm.getpref('keyfile');
+                pv.keypass (1,1) string =mslurm.getpref('keypass');
                 pv.remoteStorage (1,1) string = mslurm.getpref('remoteStorage');
                 pv.matlabRoot (1,1) string = mslurm.getpref('matlabRoot');
                 pv.localStorage (1,1) string = mslurm.getpref('localStorage');
@@ -162,6 +164,7 @@ classdef mslurm < handle
             o.host= pv.host;
             o.user = pv.user;
             o.keyfile = pv.keyfile;
+            o.keypass = pv.keypass;
             o.remoteStorage = pv.remoteStorage;
             o.matlabRoot = pv.matlabRoot;
             o.localStorage = pv.localStorage;
@@ -360,7 +363,7 @@ classdef mslurm < handle
             if ~exist(o.keyfile,"FILE")
                 error('The specified SSH key file does not exist: %s ', o.keyfile);
             end
-            o.ssh = ssh2_config_publickey(char(o.host),char(o.user),char(o.keyfile),' ');
+            o.ssh = ssh2_config_publickey(char(o.host),char(o.user),char(o.keyfile),char(o.keypass));
             o.ssh.command_ignore_stderr = false;
 
             if ~o.exist(o.remoteStorage,"DIR")
