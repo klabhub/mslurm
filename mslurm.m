@@ -872,7 +872,7 @@ classdef mslurm < handle
             tf = tf | ismember({allJobs.JobID},job(~isJobName));                      
             jobIds = {allJobs(tf).JobID};
             jobName = string(unique({allJobs(tf).JobName}));
-            assert(numel(jobName)==1,"Retry must be done one job at a time (multiple elements of an array job are allowed)");
+            assert(isscalar(jobName),"Retry must be done one job at a time (multiple elements of an array job are allowed)");
             
             ff = fullfile(o.localStorage,jobName,o.SBATCHFILE);
             if ~exist(ff,'file')
@@ -1408,7 +1408,7 @@ classdef mslurm < handle
                     end
                 end
             else
-                error("%s does not exist. Cannot run this task.",pv.mFile)
+                error("%s does not exist. Cannot run this task. (Check that it isn't shadowed by a folder with the same name)",pv.mFile)
             end
             %% Save the results
             % Save the result in the jobDir as 1.result.mat, 2.result.mat
