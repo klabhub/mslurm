@@ -36,7 +36,7 @@ classdef mslurm < handle
         keyfile             string  = ""; % Name of the SSH key file. (full name)
         keypass             string  = ""; % Password for the SSH key file. 
         matlabRoot          string  = ""; % Matlab root on the cluster.
-        matlabOptions       string  = "-nodisplay -nodesktop "; % Command line arguments used to start Matlab. (for some usage -nojvm or -noFigureWindows could be added to speedup startup)
+        matlabOptions       string  = "-nodisplay -nodesktop"; % Command line arguments used to start Matlab. (for some usage -nojvm or -noFigureWindows could be added to speedup startup)
         mslurmFolder        string  = ""; % Folder where this mslurm toolbox is installed on the cluster.
         nodeTempDir         string  = "";  % The path to a directory on a node that can be used to save data temporarily (e.g. /scratch/)
    
@@ -753,7 +753,7 @@ classdef mslurm < handle
                     wd = pv.workingDirectory;
                 end                
                 % Construct the shell command passed to srun
-                runStr = "%s/matlab "  + sd  + o.matlabOptions + " -batch ""try;%s;cd '%s';mslurm.remoteHandler($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID,%s);catch me;mslurm.exit(me);end;mslurm.exit(0);""";
+                runStr = "%s/matlab "  + sd  + " " + o.matlabOptions + " " + " -batch ""try;%s;cd '%s';mslurm.remoteHandler($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID,%s);catch me;mslurm.exit(me);end;mslurm.exit(0);""";
                 run = sprintf(runStr,o.matlabRoot,addPathStr,wd,extraIn);                
             elseif pv.command ~=""
                 % The user knows what to do. Run this command as is with srun.
