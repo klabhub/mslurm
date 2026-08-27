@@ -7,7 +7,7 @@ function result = slurmDiagnose(options)
 %  "basic" : some general diagnostics about the node where Matlab runs
 %
 % EXAMPLE:
-% s.remote("slurmDiagnose","BASIC")
+% s.remote("slurmDiagnose","BASIC",'sbatchOptions',{'mem','16G','time',30};)
 % will perform the basic diagnosis on a single node.
 % s.feval("slurmDiagnose",repmat("basic",[1,3]))
 % will perform the basic diagnosis on three nodes/workers.

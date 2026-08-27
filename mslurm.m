@@ -32,6 +32,7 @@ classdef mslurm < handle
         remoteStorage       string  = ""; % Location on HPC Cluster where scripts and logs will be written
         localStorage        string  = ""; % Location on client where logs and scripts will be written
         host                string  = ""; % Host Address
+        openssh_mode        string  = "auto"; % SSH transport: auto, wsl, or native
         user                string  = ""; % Remote user name
         keyfile             string  = ""; % Name of the SSH key file. (full name)
         keypass             string  = ""; % Password for the SSH key file. 
@@ -72,7 +73,12 @@ classdef mslurm < handle
            if isempty(o.ssh)
                  v= true;
            else
-                v = ~(strcmpi(o.host,o.ssh.hostname) && strcmpi(o.user,o.ssh.username));
+                mode = o.openssh_mode;
+                if mode == "auto"
+                    if ispc, mode = "wsl"; else, mode = "native"; end
+                end
+                v = ~(strcmpi(o.host,o.ssh.hostname) && strcmpi(o.user,o.ssh.username) && ...
+                    isfield(o.ssh,'openssh_mode') && strcmpi(mode,o.ssh.openssh_mode));
            end
            if v; fprintf('Reconnecting to %s as %s ...',o.host,o.user);end
         end
@@ -148,6 +154,7 @@ classdef mslurm < handle
             % preferences stored per machine (see mslurm.install)
             arguments
                 pv.host (1,1) string = mslurm.getpref('host');
+                pv.openssh_mode (1,1) string = "auto";
                 pv.user (1,1) string = mslurm.getpref('user');
                 pv.keyfile (1,1) string =mslurm.getpref('keyfile');
                 pv.keypass (1,1) string =mslurm.getpref('keypass');
@@ -164,15 +171,13 @@ classdef mslurm < handle
                 here =fileparts(mfilename('fullpath'));
                 addpath(fullfile(here,'matlab-ssh2','ssh2'));
             end
-            ssh2Install = fileparts(which('ssh2'));
-            jarName = strrep(fullfile(ssh2Install,'ganymed-ssh2-build250','ganymed-ssh2-build250.jar'),'\','/');
-            if ~exist(jarName,"FILE")
-                error('Could not load the SSH2 java file. Please check your matlab-ssh2 installation.')
-            end
-            javaaddpath(jarName);
+            % OpenSSH is resolved from the operating system PATH.
             % Setup the object with saved prefs, overruled by session specific
             % input arguments to the constructor
             o.host= pv.host;
+            assert(ismember(lower(pv.openssh_mode),["auto","wsl","native"]), ...
+                'openssh_mode must be "auto", "wsl", or "native".');
+            o.openssh_mode = lower(pv.openssh_mode);
             o.user = pv.user;
             o.keyfile = pv.keyfile;
             o.keypass = pv.keypass;
@@ -374,10 +379,26 @@ classdef mslurm < handle
 
         function connect(o)
             % Connect to the remote HPC cluster
-            if ~exist(o.keyfile,"FILE")
-                error('The specified SSH key file does not exist: %s ', o.keyfile);
+            % WSL identity paths are not visible to MATLAB's Windows
+            % filesystem, but are visible to wsl.exe.
+            isWslKey = ispc && (startsWith(o.keyfile,"/") || ...
+                startsWith(o.keyfile,"~/"));
+            if ~isWslKey && ~exist(o.keyfile,"FILE")
+                %error('The specified SSH key file does not exist: %s ', o.keyfile);
+            end
+            if ~isempty(o.ssh)
+                try
+                    o.ssh = ssh2_close(o.ssh);
+                catch
+                    % The old connection may already have disappeared.
+                end
             end
             o.ssh = ssh2_config_publickey(char(o.host),char(o.user),char(o.keyfile),char(o.keypass));
+            if o.openssh_mode == "auto"
+                if ispc, o.ssh.openssh_mode = 'wsl'; else, o.ssh.openssh_mode = 'native'; end
+            else
+                o.ssh.openssh_mode = char(o.openssh_mode);
+            end
             o.ssh.command_ignore_stderr = false;
 
             if ~o.exist(o.remoteStorage,"DIR")
@@ -593,7 +614,7 @@ classdef mslurm < handle
             end
             
             % Create a unique jobName to store files
-            if pv.jobName = ""
+            if pv.jobName == ""
                 prefix = fun;
             else
                 prefix = pv.jobName;

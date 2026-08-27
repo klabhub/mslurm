@@ -65,6 +65,18 @@ This will ask for the following information:
 
 These preferences are unlikely to change frequently, but you can always update them by calling ```slurm.install``` again, or ```slurm.setpref``` to change one of these preferences. Each of these parameters can also be changed for the duration of a session by passing arguments to the constructor (see ```help slurm/slurm```).
 
+### Note on SSH
+This toolbox uses a fork of the matlab_ssh2 toolbox from David Freedman to talk to the server over ssh. 
+
+In version before August 2026 (V2.0), this relied on the Ganymed SSH Java library, which is now obsolete (it cannot
+connect to modern servers with improved authentication methods). 
+
+From release V3.0 onward, the SSH backend uses the OpenSSH implementation that is installed on the client (i.e. by calling the ssh command with system() calls in Matlab).
+
+On Windows you can eitehr use the native Windows version of OpenSSH (which is slow because each SSH command needs to reestablish a connection to the server) or the 
+use the WSL backend (fasts because a single SSH connection can be reused). You can select the mode by setting the openssh_mode property to native or wsl. The default is wsl. 
+Note that using an identity file (keyFile above) in WSL requires that file to live in the WSL file system and have the appropriate file permissions (0600).
+
 ## Usage - The mslurmApp
 
 After completing the installation steps, open the App:
