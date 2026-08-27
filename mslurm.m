@@ -573,8 +573,8 @@ classdef mslurm < handle
                 pv.startupDirectory (1,1) string = o.startupDirectory;
                 pv.workingDirectory string = o.workingDirectory;
                 pv.addPath (1,:) string = o.addPath;
-                pv.env (1,:) string = o.env;                
-
+                pv.env (1,:) string = o.env;            
+                pv.jobName (1,1) string = ""
             end
 
 
@@ -591,8 +591,14 @@ classdef mslurm < handle
                 mfilename = which(fun);
                 copy = pv.copy;
             end
-
-            [local,remote,jobName]= setupJob(o,fun);
+            
+            % Create a unique jobName to store files
+            if pv.jobName = ""
+                prefix = fun;
+            else
+                prefix = pv.jobName;
+            end
+            [local,remote,jobName]= setupJob(o,prefix);           
 
             %% Save parm/value pairs that should be passed
             if ~isempty(pv.args)
@@ -651,6 +657,7 @@ classdef mslurm < handle
             opts.nrWorkers = pv.nrWorkers;
             opts.startupDirectory = pv.startupDirectory;
             opts.addPath = pv.addPath;
+            opts.env = pv.env; 
             opts = namedargs2cell(opts);
             o.sbatch(jobName,local,remote,opts{:});
 
