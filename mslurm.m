@@ -1094,7 +1094,7 @@ classdef mslurm < handle
             %               (i.e. all jobs started 24 hours before now)
             % 'endtime'  = Restrict to jobs that were submitted before this
             %               time.
-            % 'removeSteps' = Remove the .batch and .0 jobs that sacct
+            % 'removeSteps' = Remove the .batch, .0, and .extern job steps that sacct
             % shows (but which are really just part of the main job) [true]
             % OUTPUT
             % data = A struct with all information retrieved from SLURM.
@@ -1157,7 +1157,7 @@ classdef mslurm < handle
                 if pv.removeSteps
                     % Remove the jobs that seem to be part of the jobs that I
                     % start (they have jobIDs with .0 or .batch at the end)
-                    stay = cellfun(@isempty,regexp({data.JobID},'\.0\>')) & cellfun(@isempty,regexp({data.JobID},'\.batch\>')) ;
+                    stay = cellfun(@isempty,regexp({data.JobID},'\.0\>')) & cellfun(@isempty,regexp({data.JobID},'\.batch\>')) & cellfun(@isempty,regexp({data.JobID},'\.extern\>')) ;
                     steps = data(~stay);
                     data = data(stay);
                     jobID={data.JobID};
