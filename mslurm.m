@@ -862,7 +862,7 @@ classdef mslurm < handle
             % Cancel a slurm job by its name or Job ID
             arguments
                 o (1,1) mslurm
-                job (1,1) string
+                job (1,:) string
             end
             allJobs = [o.jobs];
             if any(contains(job,'-'))
@@ -1445,6 +1445,7 @@ classdef mslurm < handle
             %% Save the results
             % Save the result in the jobDir as 1.result.mat, 2.result.mat
             mslurm.saveResult(string(taskNr)+ ".result.mat" ,result,pv.nodeTempDir,pv.jobDir);
+            mslurm.log("Remote handler done. Exiting matlab... ");
         end
 
 
