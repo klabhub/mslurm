@@ -10,8 +10,8 @@
 %   install()  - Install preferences that likely stay the same on a client.
 %   remote() - Run a script, function, or expression on the cluster.
 %
-% See Also mslurmApp demos/tutorial.mlx 
-% 
+% See Also mslurmApp demos/tutorial.mlx
+%
 %
 %
 % BK - Jan 2015
@@ -35,12 +35,12 @@ classdef mslurm < handle
         openssh_mode        string  = "auto"; % SSH transport: auto, wsl, or native
         user                string  = ""; % Remote user name
         keyfile             string  = ""; % Name of the SSH key file. (full name)
-        keypass             string  = ""; % Password for the SSH key file. 
+        keypass             string  = ""; % Password for the SSH key file.
         matlabRoot          string  = ""; % Matlab root on the cluster.
         matlabOptions       string  = "-nodisplay -nodesktop"; % Command line arguments used to start Matlab. (for some usage -nojvm or -noFigureWindows could be added to speedup startup)
         mslurmFolder        string  = ""; % Folder where this mslurm toolbox is installed on the cluster.
         nodeTempDir         string  = "";  % The path to a directory on a node that can be used to save data temporarily (e.g. /scratch/)
-   
+
         %% Session defaults (can be overruled when submitting specific jobs).
         startupDirectory    string  = "";  % The directory where matlab will start (-sd command line argument)
         workingDirectory    string  = ""; % The directory where the code will execute (if unspecified, defaults to remoteStorage location)
@@ -70,17 +70,17 @@ classdef mslurm < handle
     %% Get/set methods for dependent properties
     methods
         function v = get.mustReconnect(o)
-           if isempty(o.ssh)
-                 v= true;
-           else
+            if isempty(o.ssh)
+                v= true;
+            else
                 mode = o.openssh_mode;
                 if mode == "auto"
                     if ispc, mode = "wsl"; else, mode = "native"; end
                 end
                 v = ~(strcmpi(o.host,o.ssh.hostname) && strcmpi(o.user,o.ssh.username) && ...
                     isfield(o.ssh,'openssh_mode') && strcmpi(mode,o.ssh.openssh_mode));
-           end
-           if v; fprintf('Reconnecting to %s as %s ...',o.host,o.user);end
+            end
+            if v; fprintf('Reconnecting to %s as %s ...',o.host,o.user);end
         end
         function v=get.pwd(o)
             v = command(o,'pwd');
@@ -90,7 +90,7 @@ classdef mslurm < handle
             v = length(o.jobs);
         end
         function v=get.isConnected(o)
-            if o.mustReconnect;o.connect;end            
+            if o.mustReconnect;o.connect;end
             v = ~isempty(o.ssh) && ~isempty(o.ssh.connection);
         end
 
@@ -582,19 +582,19 @@ classdef mslurm < handle
             arguments
                 o (1,1) mslurm
                 fun (1,1)
-                data (:,:) =[]                
+                data (:,:) =[]
                 pv.args (1,:) cell ={}
                 pv.debug (1,1) logical  = false
                 pv.copy (1,1) logical  = false
                 pv.nrWorkers (1,1) double = 0
                 pv.expressionName (1,1) string ="expression"
-                
+
                 pv.sbatchOptions (1,:) cell = o.sbatchOptions
                 pv.runOptions (1,1) string = ""
                 pv.startupDirectory (1,1) string = o.startupDirectory;
                 pv.workingDirectory string = o.workingDirectory;
                 pv.addPath (1,:) string = o.addPath;
-                pv.env (1,:) string = o.env;            
+                pv.env (1,:) string = o.env;
                 pv.jobName (1,1) string = ""
             end
 
@@ -612,14 +612,14 @@ classdef mslurm < handle
                 mfilename = which(fun);
                 copy = pv.copy;
             end
-            
+
             % Create a unique jobName to store files
             if pv.jobName == ""
                 prefix = fun;
             else
                 prefix = pv.jobName;
             end
-            [local,remote,jobName]= setupJob(o,prefix);           
+            [local,remote,jobName]= setupJob(o,prefix);
 
             %% Save parm/value pairs that should be passed
             if ~isempty(pv.args)
@@ -638,7 +638,7 @@ classdef mslurm < handle
 
             if isempty(data)
                 remoteDataFile = "";
-                assert(pv.nrWorkers>0,"nrWorkers must be larger than zero (%d)" ,pv.nrWorkers)          
+                assert(pv.nrWorkers>0,"nrWorkers must be larger than zero (%d)" ,pv.nrWorkers)
             else
                 if ischar(data)
                     % Assume that a single string input means pass this string
@@ -672,13 +672,13 @@ classdef mslurm < handle
             opts.sbatchOptions = pv.sbatchOptions;
             opts.mfile =fun;
             opts.argsFile =remoteArgsFile;
-            opts.dataFile= remoteDataFile;            
+            opts.dataFile= remoteDataFile;
             opts.debug = pv.debug;
             opts.runOptions= pv.runOptions;
             opts.nrWorkers = pv.nrWorkers;
             opts.startupDirectory = pv.startupDirectory;
             opts.addPath = pv.addPath;
-            opts.env = pv.env; 
+            opts.env = pv.env;
             opts = namedargs2cell(opts);
             o.sbatch(jobName,local,remote,opts{:});
 
@@ -762,7 +762,7 @@ classdef mslurm < handle
 
 
 
-            if pv.mFile ~=""              
+            if pv.mFile ~=""
                 % Create the pv pairs for the remoteHandler. Ugly because "
                 % needs to be escaped for Matlab and then again for bash.
                 extraIn =sprintf("'mFile',\\""%s\\"",'argsFile',\\""%s\\"",'dataFile',\\""%s\\"",'nodeTempDir',\\""%s\\"",'jobDir',\\""%s\\""",pv.mFile,pv.argsFile,pv.dataFile,pv.nodeTempDir,remote);
@@ -779,10 +779,10 @@ classdef mslurm < handle
                 else
                     % Run in specified working Directory
                     wd = pv.workingDirectory;
-                end                
+                end
                 % Construct the shell command passed to srun
-                runStr = "%s/matlab "  + sd  + " " + o.matlabOptions + " " + " -batch ""try;%s;cd '%s';mslurm.remoteHandler($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID,%s);catch me;mslurm.exit(me);end;mslurm.exit(0);""";
-                run = sprintf(runStr,o.matlabRoot,addPathStr,wd,extraIn);                
+                runStr = "%s "  + sd  + " " + o.matlabOptions + " " + " -batch ""try;%s;cd '%s';mslurm.remoteHandler($SLURM_JOB_ID,$SLURM_ARRAY_TASK_ID,%s);catch me;mslurm.exit(me);end;mslurm.exit(0);""";
+                run = sprintf(runStr,mslurm.unixfile(o.matlabRoot,'matlab'),addPathStr,wd,extraIn);
             elseif pv.command ~=""
                 % The user knows what to do. Run this command as is with srun.
                 run = pv.command;
@@ -791,11 +791,11 @@ classdef mslurm < handle
             end
 
 
-                % Ensure that array job numbers generated by slurm are
-                % base-1 (default is base zero)
-                sbatchOpts = cat(2,pv.sbatchOptions,{'array',['1-' num2str(pv.nrWorkers)]});
-                outFile = mslurm.STDOUTFILE + "_%a.out";
-           
+            % Ensure that array job numbers generated by slurm are
+            % base-1 (default is base zero)
+            sbatchOpts = cat(2,pv.sbatchOptions,{'array',['1-' num2str(pv.nrWorkers)]});
+            outFile = mslurm.STDOUTFILE + "_%a.out";
+
             % Add the sbatch options
             % Options with empty values are removed.
             empty = find(cellfun(@isempty,sbatchOpts(2:2:end)));
@@ -886,7 +886,7 @@ classdef mslurm < handle
 
 
         function retry(o,job,pv)
-            % Retry a named job 
+            % Retry a named job
             % 'callSacct' = set to true to force rereading the sacct log. [true]
             arguments
                 o (1,1) mslurm
@@ -894,51 +894,51 @@ classdef mslurm < handle
                 pv.sacct (1,1) logical = true
             end
             if pv.sacct
-                   o.sacct; % Update the jobs log
+                o.sacct; % Update the jobs log
             end
             allJobs = [o.jobs];
             isJobName = contains(job,"-");
             %A job name ;find the corresponding ID first.
             tf= ismember({allJobs.JobName},job(isJobName));
             % A job number (xxx_x)
-            tf = tf | ismember({allJobs.JobID},job(~isJobName));                      
+            tf = tf | ismember({allJobs.JobID},job(~isJobName));
             jobIds = {allJobs(tf).JobID};
             jobName = string(unique({allJobs(tf).JobName}));
             assert(isscalar(jobName),"Retry must be done one job at a time (multiple elements of an array job are allowed)");
-            
+
             ff = fullfile(o.localStorage,jobName,o.SBATCHFILE);
             if ~exist(ff,'file')
                 error('')
             else
                 fid = fopen(ff,"r");
-                newContent = [];                
+                newContent = [];
                 while (fid~=-1)
-                   line =  fgetl(fid);
-                   if line==-1;break;end
-                   match = regexp(line,'#SBATCH --(?<opt>[\w\d-\.]+)=(?<val>[\w\d\.-]+)','names');
-                   if isempty(match)
-                         thisNewContent = sprintf("%s\n",line);
-                   else
-                       switch upper(match.opt)
-                           case 'JOB-NAME'
-                               newJobName = ['retry' match.val];
-                               thisNewContent = sprintf('#SBATCH --job-name=%s\n',newJobName);                         
-                           case 'ARRAY'                               
-                               match = regexp(jobIds,'(?<jobNr>\d+)_(?<arrayNr>\d+)','names');
-                               if isempty(match)
+                    line =  fgetl(fid);
+                    if line==-1;break;end
+                    match = regexp(line,'#SBATCH --(?<opt>[\w\d-\.]+)=(?<val>[\w\d\.-]+)','names');
+                    if isempty(match)
+                        thisNewContent = sprintf("%s\n",line);
+                    else
+                        switch upper(match.opt)
+                            case 'JOB-NAME'
+                                newJobName = ['retry' match.val];
+                                thisNewContent = sprintf('#SBATCH --job-name=%s\n',newJobName);
+                            case 'ARRAY'
+                                match = regexp(jobIds,'(?<jobNr>\d+)_(?<arrayNr>\d+)','names');
+                                if isempty(match)
                                     fclose(fid);
                                     error('JobID does not match the xxxx_xx format')
-                               else
+                                else
                                     match = [match{:}];
                                     arrayNr = string({match.arrayNr});
                                 end
-                               thisNewContent = sprintf('#SBATCH --array=%s\n',strjoin(arrayNr,","));
-                           otherwise 
-                               % Unchanged property
-                               thisNewContent = sprintf("%s\n",line);
-                       end
-                   end
-                       newContent =[newContent; thisNewContent]; %#ok<AGROW>
+                                thisNewContent = sprintf('#SBATCH --array=%s\n',strjoin(arrayNr,","));
+                            otherwise
+                                % Unchanged property
+                                thisNewContent = sprintf("%s\n",line);
+                        end
+                    end
+                    newContent =[newContent; thisNewContent]; %#ok<AGROW>
                 end
                 fclose(fid);
                 fid = fopen(ff,"w");
@@ -958,7 +958,7 @@ classdef mslurm < handle
                 else
                     mslurm.log("Successfully re-submitted %s as %s (JobID= %d)",jobName, newJobName, jobId );
                 end
-            end            
+            end
         end
 
 
@@ -1267,7 +1267,7 @@ classdef mslurm < handle
                 %file = '';
                 line = 0;
             end
-           % fprintf(msg + "\n" ,varargin{:});
+            % fprintf(msg + "\n" ,varargin{:});
             fprintf(msg + "\t\t (%s@line %d)\n" ,varargin{:},fun,line);
         end
 
@@ -1413,12 +1413,12 @@ classdef mslurm < handle
                     isFunction= false;
                     assert(isempty(data) && isempty(args),'%s is a script, but you are trying to data or parm/value pairs.')
                 end
-                if isFunction                    
+                if isFunction
                     % A function, pass the input args as a struct
                     mslurm.log("Calling %s with %d input arguments (%s).",pv.mFile,numel(args)/2,strjoin(args(1:2:end),'/'));
                     % Output of the function will be saved to results
                     result = cell(1,nout);
-                    if passData                        
+                    if passData
                         [result{:}]= feval(pv.mFile,data,args{:});
                     else
                         [result{:}]= feval(pv.mFile,args{:});
