@@ -74,7 +74,7 @@ connect to modern servers with improved authentication methods).
 From release V3.0 onward, the SSH backend uses the OpenSSH implementation that is installed on the client (i.e. by calling the ssh command with system() calls in Matlab).
 
 On Windows you can eitehr use the native Windows version of OpenSSH (which is slow because each SSH command needs to reestablish a connection to the server) or the 
-use the WSL backend (fasts because a single SSH connection can be reused). You can select the mode by setting the openssh_mode property to native or wsl. The default is wsl. 
+WSL backend (fasts because a single SSH connection can be reused). You can select the mode by setting the openssh_mode property to native or wsl. The default is wsl. 
 Note that using an identity file (keyFile above) in WSL requires that file to live in the WSL file system and have the appropriate file permissions (0600).
 
 ## Usage - The mslurmApp
@@ -125,6 +125,6 @@ See demos/tutorial.mlx for walktrough of various susage scenarios.
 
 ## Extending the toolbox
 
-The slurm.sbatch function is the low-level workhorse that submits jobs to SLURM. You can call this directly from your code to make SLURM do anything you want. The mslurm.remote function (the main workhorse that can be used for many scenarios; see demos/tutorial.mlx)  shows one way of simplifying the calls, but ultimately calls nslurm.sbatch. You can use mslurm.remote or create a new wrapper around mslurm.sbatch that better suits your workflow.
+The slurm.sbatch function is the low-level workhorse that submits jobs to SLURM. You can call this directly from your code to make SLURM do anything you want. The mslurm.remote function (the main workhorse that can be used for many scenarios; see demos/tutorial.mlx)  shows one way of simplifying the calls, but ultimately calls mslurm.sbatch. You can use mslurm.remote or create a new wrapper around mslurm.sbatch that better suits your workflow.
 
 [![DOI](https://zenodo.org/badge/93510696.svg)](https://zenodo.org/badge/latestdoi/93510696)
