@@ -2,7 +2,11 @@
 
 *Bart Krekelberg - 2015 / June 2017 - Public release / Nov 2023 - Major revision. Release V2.0. / Sep 2026 - Added OpenSSH. Release V3.0*
 
+
 This Matlab toolbox sends jobs from your local machine (the client) to an HPC cluster running the SLURM scheduler (the server). As long as you have unlimited licenses to run Matlab on the cluster, this allows you to run many jobs in parallel, without the Matlab Compute Server (aka distributed computing server) license. This only works for "dumb" parallelism though; messaging between jobs is not used. A simple app shows information from the slurm acccounting log on the server, can retrieve data and log files, and allows you to restart failed jobs.
+
+If you use this toolbox, please cite: [![DOI](https://zenodo.org/badge/93510696.svg)](https://zenodo.org/badge/latestdoi/93510696)
+
 
 ***This toolbox does not use the Matlab Compute Server. The [kSlurm](https://github.com/klabhub/kSlurm) toolbox does use MCS, but, in my experience, the features of MCS are not worth the complexity of using it (unexplained Matlab segfault crashes, missing diary files making it impossible to find bugs, etc.).***
 
@@ -126,5 +130,3 @@ See demos/tutorial.mlx for walktrough of various susage scenarios.
 ## Extending the toolbox
 
 The slurm.sbatch function is the low-level workhorse that submits jobs to SLURM. You can call this directly from your code to make SLURM do anything you want. The mslurm.remote function (the main workhorse that can be used for many scenarios; see demos/tutorial.mlx)  shows one way of simplifying the calls, but ultimately calls mslurm.sbatch. You can use mslurm.remote or create a new wrapper around mslurm.sbatch that better suits your workflow.
-
-[![DOI](https://zenodo.org/badge/93510696.svg)](https://zenodo.org/badge/latestdoi/93510696)
