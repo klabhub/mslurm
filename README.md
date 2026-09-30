@@ -1,6 +1,6 @@
 # mslurm Matlab Toolbox
 
-*Bart Krekelberg - 2015 / June 2017 - Public release / Nov 2023 - Major revision. Release V2.0.*
+*Bart Krekelberg - 2015 / June 2017 - Public release / Nov 2023 - Major revision. Release V2.0. / Sep 2026 - Added OpenSSH. Release V3.0*
 
 This Matlab toolbox sends jobs from your local machine (the client) to an HPC cluster running the SLURM scheduler (the server). As long as you have unlimited licenses to run Matlab on the cluster, this allows you to run many jobs in parallel, without the Matlab Compute Server (aka distributed computing server) license. This only works for "dumb" parallelism though; messaging between jobs is not used. A simple app shows information from the slurm acccounting log on the server, can retrieve data and log files, and allows you to restart failed jobs.
 
